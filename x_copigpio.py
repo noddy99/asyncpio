@@ -15,7 +15,7 @@ import sys
 import time
 import struct
 
-import pigpio
+import copigpio
 
 GPIO=25
 
