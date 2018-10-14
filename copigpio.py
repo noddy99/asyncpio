@@ -53,17 +53,17 @@ By default a fatal exception is raised if you pass an invalid
 argument to a pigpio function.
 
 If you wish to handle the returned status yourself you should set
-pigpio.exceptions to False.
+copigpio.exceptions to False.
 
 You may prefer to check the returned status in only a few parts
 of your code.  In that case do the following:
 
 ...
-pigpio.exceptions = False
+copigpio.exceptions = False
 
 # Code where you want to test the error status.
 
-pigpio.exceptions = True
+copigpio.exceptions = True
 ...
 
 *Usage*
@@ -77,27 +77,30 @@ start).
 sudo pigpiod
 
 Your Python program must import pigpio and create one or more
-instances of the pigpio.pi class.  This class gives access to
+instances of the copigpio.pi class.  This class gives access to
 a specified Pi's GPIO.
 
 ...
-pi1 = pigpio.pi()       # pi1 accesses the local Pi's GPIO
-pi2 = pigpio.pi('tom')  # pi2 accesses tom's GPIO
-pi3 = pigpio.pi('dick') # pi3 accesses dick's GPIO
+pi1 = copigpio.pi()
+await pi1.connect()       # pi1 accesses the local Pi's GPIO
+pi2 = copigpio.pi()
+await pi2.connect('tom')  # pi2 accesses tom's GPIO
+pi3 = copigpio.pi()
+await pi3.connect('dick') # pi3 accesses dick's GPIO
 
-pi1.write(4, 0) # set local Pi's GPIO 4 low
-pi2.write(4, 1) # set tom's GPIO 4 to high
-pi3.read(4)     # get level of dick's GPIO 4
+await pi1.write(4, 0) # set local Pi's GPIO 4 low
+await pi2.write(4, 1) # set tom's GPIO 4 to high
+await pi3.read(4)     # get level of dick's GPIO 4
 ...
 
 The later example code snippets assume that pi is an instance of
-the pigpio.pi class.
+the copigpio.pi class.
 
 OVERVIEW
 
 ESSENTIAL
 
-pigpio.pi                 Initialise Pi connection
+copigpio.pi               Initialise Pi connection
 stop                      Stop a Pi connection
 
 BASIC
@@ -319,15 +322,15 @@ get_current_tick          Get current tick (microseconds)
 get_hardware_revision     Get hardware revision
 get_pigpio_version        Get the pigpio version
 
-pigpio.error_text         Gets error text from error number
-pigpio.tickDiff           Returns difference between two ticks
+copigpio.error_text       Gets error text from error number
+copigpio.tickDiff         Returns difference between two ticks
 """
 
 import sys
 import socket
 import struct
-import time
-import threading
+import asyncio
+import inspect
 import os
 import atexit
 
@@ -886,23 +889,42 @@ variables PIGPIO_ADDR/PIGPIO_PORT?
 E.g. export PIGPIO_ADDR=soft, export PIGPIO_PORT=8888
 
 Did you specify the correct Pi host/port in the
-pigpio.pi() function? E.g. pigpio.pi('soft', 8888)"""
+copigpio.pi.connect() function? E.g. await pi.connect('soft', 8888)"""
 
 _except_2 = """
 Do you have permission to access the pigpio daemon?
 Perhaps it was started with sudo pigpiod -nlocalhost"""
 
 _except_3 = """
-Can't create callback thread.
+Can't create callback handler.
 Perhaps too many simultaneous pigpio connections."""
+
+class _cosocket:
+   """An asynchronous socket."""
+   def __init__(self, loop, sock):
+      sock.setblocking(False)
+      self._loop = loop
+      self._socket = sock
+
+   def close(self):
+      self._socket.close()
+
+   async def recv(self, nbytes):
+      return await self._loop.sock_recv(self._socket, nbytes)
+
+   async def send(self, data):
+      await self._loop.sock_sendall(self._socket, data)
+
+   async def sendall(self, data):
+      await self._loop.sock_sendall(self._socket, data)
 
 class _socklock:
    """
    A class to store socket and lock.
    """
-   def __init__(self):
+   def __init__(self, loop=None):
       self.s = None
-      self.l = threading.Lock()
+      self.l = asyncio.Lock(loop)
 
 class error(Exception):
    """pigpio module exception"""
@@ -936,7 +958,7 @@ def error_text(errnum):
    errnum:= <0, the error number
 
    ...
-   print(pigpio.error_text(-5))
+   print(copigpio.error_text(-5))
    level not 0-1
    ...
    """
@@ -953,7 +975,7 @@ def tickDiff(t1, t2):
    t2:= the later tick
 
    ...
-   print(pigpio.tickDiff(4294967272, 12))
+   print(copigpio.tickDiff(4294967272, 12))
    36
    ...
    """
@@ -1012,7 +1034,7 @@ def _u2i(uint32):
          raise error(error_text(v))
    return v
 
-def _pigpio_command(sl, cmd, p1, p2):
+async def _pigpio_command(sl, cmd, p1, p2):
    """
    Runs a pigpio socket command.
 
@@ -1023,11 +1045,12 @@ def _pigpio_command(sl, cmd, p1, p2):
    """
    res = PI_CMD_INTERRUPTED
    with sl.l:
-      sl.s.send(struct.pack('IIII', cmd, p1, p2, 0))
-      dummy, res = struct.unpack('12sI', sl.s.recv(_SOCK_CMD_LEN))
+      await sl.s.send(struct.pack('IIII', cmd, p1, p2, 0))
+      raw_res = await sl.s.recv(_SOCK_CMD_LEN)
+   dummy, res = struct.unpack('12sI', raw_res)
    return res
 
-def _pigpio_command_nolock(sl, cmd, p1, p2):
+async def _pigpio_command_nolock(sl, cmd, p1, p2):
    """
    Runs a pigpio socket command.
 
@@ -1037,11 +1060,12 @@ def _pigpio_command_nolock(sl, cmd, p1, p2):
     p2:= command parameter 2 (if applicable).
    """
    res = PI_CMD_INTERRUPTED
-   sl.s.send(struct.pack('IIII', cmd, p1, p2, 0))
-   dummy, res = struct.unpack('12sI', sl.s.recv(_SOCK_CMD_LEN))
+   await sl.s.send(struct.pack('IIII', cmd, p1, p2, 0))
+   raw_res = await sl.s.recv(_SOCK_CMD_LEN)
+   dummy, res = struct.unpack('12sI', raw_res)
    return res
 
-def _pigpio_command_ext(sl, cmd, p1, p2, p3, extents):
+async def _pigpio_command_ext(sl, cmd, p1, p2, p3, extents):
    """
    Runs an extended pigpio socket command.
 
@@ -1060,11 +1084,12 @@ def _pigpio_command_ext(sl, cmd, p1, p2, p3, extents):
          ext.extend(x)
    res = PI_CMD_INTERRUPTED
    with sl.l:
-      sl.s.sendall(ext)
-      dummy, res = struct.unpack('12sI', sl.s.recv(_SOCK_CMD_LEN))
+      await sl.s.sendall(ext)
+      raw_res = await sl.s.recv(_SOCK_CMD_LEN)
+   dummy, res = struct.unpack('12sI', raw_res)
    return res
 
-def _pigpio_command_ext_nolock(sl, cmd, p1, p2, p3, extents):
+async def _pigpio_command_ext_nolock(sl, cmd, p1, p2, p3, extents):
    """
    Runs an extended pigpio socket command.
 
@@ -1082,9 +1107,21 @@ def _pigpio_command_ext_nolock(sl, cmd, p1, p2, p3, extents):
          ext.extend(_b(x))
       else:
          ext.extend(x)
-   sl.s.sendall(ext)
-   dummy, res = struct.unpack('12sI', sl.s.recv(_SOCK_CMD_LEN))
+   await sl.s.sendall(ext)
+   raw_res = await sl.s.recv(_SOCK_CMD_LEN)
+   dummy, res = struct.unpack('12sI', raw_res)
    return res
+
+def _ensure_awaitable(func):
+   async def call(*args, **kwargs):
+      # If func is a normal function, r is its result.
+      # If func is a coroutine, or returns an awaitable object,
+      # r is an awaitable.
+      r = func(*args, **kwargs)
+      if inspect.isawaitable(r):
+         r = await r
+      return r
+   return call
 
 class _event_ADT:
    """
@@ -1099,7 +1136,7 @@ class _event_ADT:
        func:= a user function taking one argument, the event id.
       """
       self.event = event
-      self.func = func
+      self.func = _ensure_awaitable(func)
       self.bit = 1<<event
 
 class _callback_ADT:
@@ -1115,42 +1152,60 @@ class _callback_ADT:
       """
       self.gpio = gpio
       self.edge = edge
-      self.func = func
+      self.func = _ensure_awaitable(func)
       self.bit = 1<<gpio
 
-class _callback_thread(threading.Thread):
+class _callback_handler:
    """A class to encapsulate pigpio notification callbacks."""
-   def __init__(self, control, host, port):
+   def __init__(self, control, loop=None):
       """Initialises notifications."""
-      threading.Thread.__init__(self)
+      if loop is None:
+         loop = asyncio.get_event_loop()
+
       self.control = control
+      self._loop = loop
       self.sl = _socklock()
-      self.go = False
-      self.daemon = True
+
+      self._init()
+
+   def _init(self):
+      self.handle = None
       self.monitor = 0
       self.event_bits = 0
       self.callbacks = []
       self.events = []
-      self.sl.s = socket.create_connection((host, port), None)
-      self.lastLevel = _pigpio_command(self.sl,  _PI_CMD_BR1, 0, 0)
-      self.handle = _u2i(_pigpio_command(self.sl, _PI_CMD_NOIB, 0, 0))
-      self.go = True
-      self.start()
+      self._notify_task = None
 
-   def stop(self):
-      """Stops notifications."""
-      if self.go:
-         self.go = False
-         self.sl.s.send(struct.pack('IIII', _PI_CMD_NC, self.handle, 0, 0))
+   async def listen(self, host, port):
+      """Connect and listen for notifications."""
+      sock = socket.create_connection((host, port), None)
+      self.sl.s = _cosocket(self._loop, socket)
+      self.lastLevel = await _pigpio_command(self.sl,  _PI_CMD_BR1, 0, 0)
+      self.handle = await _u2i(_pigpio_command(self.sl, _PI_CMD_NOIB, 0, 0))
+      self._notify_task = self._loop.create_task(self._notify)
 
-   def append(self, callb):
-      """Adds a callback to the notification thread."""
+   async def stop(self):
+      """Stop notifications."""
+      if self._notify_task is not None:
+         self._notify_task.cancel()
+         # This causes pigpiod to release the handle.
+         await self.sl.s.send(struct.pack('IIII', _PI_CMD_NC, self.handle, 0, 0))
+         self._init()
+
+   async def append(self, callb):
+      """Adds a callback to the notification handler."""
+      if self.handle is None:
+         raise error("Call listen() before adding a callback")
+
       self.callbacks.append(callb)
       self.monitor = self.monitor | callb.bit
-      _pigpio_command(self.control, _PI_CMD_NB, self.handle, self.monitor)
+      await _pigpio_command(self.control, _PI_CMD_NB, self.handle, self.monitor)
 
-   def remove(self, callb):
-      """Removes a callback from the notification thread."""
+   async def remove(self, callb):
+      """Removes a callback from the notification handler."""
+      if self.handle is None:
+         assert self.callbacks == []
+
       if callb in self.callbacks:
          self.callbacks.remove(callb)
          newMonitor = 0
@@ -1158,21 +1213,27 @@ class _callback_thread(threading.Thread):
             newMonitor |= c.bit
          if newMonitor != self.monitor:
             self.monitor = newMonitor
-            _pigpio_command(
+            await _pigpio_command(
                self.control, _PI_CMD_NB, self.handle, self.monitor)
 
-   def append_event(self, callb):
+   async def append_event(self, callb):
       """
-      Adds an event callback to the notification thread.
+      Adds an event callback to the notification handler.
       """
+      if self.handle is None:
+         raise error("Call listen() before adding an event")
+
       self.events.append(callb)
       self.event_bits = self.event_bits | callb.bit
-      _pigpio_command(self.control, _PI_CMD_EVM, self.handle, self.event_bits)
+      await _pigpio_command(self.control, _PI_CMD_EVM, self.handle, self.event_bits)
 
-   def remove_event(self, callb):
+   async def remove_event(self, callb):
       """
-      Removes an event callback from the notification thread.
+      Removes an event callback from the notification handler.
       """
+      if self.handle is None:
+         assert self.events == []
+
       if callb in self.events:
          self.events.remove(callb)
          new_event_bits = 0
@@ -1180,11 +1241,11 @@ class _callback_thread(threading.Thread):
             new_event_bits |= c.bit
          if new_event_bits != self.event_bits:
             self.event_bits = new_event_bits
-            _pigpio_command(
+            await _pigpio_command(
                self.control, _PI_CMD_EVM, self.handle, self.event_bits)
 
-   def run(self):
-      """Runs the notification thread."""
+   async def _notify(self):
+      """Runs the notification loop."""
 
       lastLevel = self.lastLevel
 
@@ -1192,12 +1253,12 @@ class _callback_thread(threading.Thread):
       MSG_SIZ = 12
 
       buf = bytes()
-      while self.go:
+      while True:
 
-         buf += self.sl.s.recv(RECV_SIZ)
+         buf += await self.sl.s.recv(RECV_SIZ)
          offset = 0
 
-         while self.go and (len(buf) - offset) >= MSG_SIZ:
+         while (len(buf) - offset) >= MSG_SIZ:
             msgbuf = buf[offset:offset + MSG_SIZ]
             offset += MSG_SIZ
             seq, flags, tick, level = (struct.unpack('HHII', msgbuf))
@@ -1211,18 +1272,18 @@ class _callback_thread(threading.Thread):
                      if cb.bit & level:
                         newLevel = 1
                      if (cb.edge ^ newLevel):
-                         cb.func(cb.gpio, newLevel, tick)
+                         await cb.func(cb.gpio, newLevel, tick)
             else:
                if flags & NTFY_FLAGS_WDOG:
                   gpio = flags & NTFY_FLAGS_GPIO
                   for cb in self.callbacks:
                      if cb.gpio == gpio:
-                        cb.func(gpio, TIMEOUT, tick)
+                        await cb.func(gpio, TIMEOUT, tick)
                elif flags & NTFY_FLAGS_EVENT:
                   event = flags & NTFY_FLAGS_GPIO
                   for cb in self.events:
                      if cb.event == event:
-                        cb.func(event, tick)
+                        await cb.func(event, tick)
          buf = buf[offset:]
 
       self.sl.s.close()
@@ -1232,7 +1293,7 @@ class _callback:
 
    def __init__(self, notify, user_gpio, edge=RISING_EDGE, func=None):
       """
-      Initialise a callback and adds it to the notification thread.
+      Initialise a callback.
       """
       self._notify = notify
       self.count=0
@@ -1240,11 +1301,10 @@ class _callback:
       if func is None:
          func=self._tally
       self.callb = _callback_ADT(user_gpio, edge, func)
-      self._notify.append(self.callb)
 
-   def cancel(self):
-      """Cancels a callback by removing it from the notification thread."""
-      self._notify.remove(self.callb)
+   async def cancel(self):
+      """Cancel the callback."""
+      await self._notify.remove(self.callb)
 
    def _tally(self, user_gpio, level, tick):
       """Increment the callback called count."""
@@ -1275,7 +1335,7 @@ class _event:
 
    def __init__(self, notify, event, func=None):
       """
-      Initialise an event and adds it to the notification thread.
+      Initialise an event.
       """
       self._notify = notify
       self.count=0
@@ -1283,14 +1343,10 @@ class _event:
       if func is None:
          func=self._tally
       self.callb = _event_ADT(event, func)
-      self._notify.append_event(self.callb)
 
-   def cancel(self):
-      """
-      Cancels a event callback by removing it from the
-      notification thread.
-      """
-      self._notify.remove_event(self.callb)
+   async def cancel(self):
+      """Cancel the event callback."""
+      await self._notify.remove_event(self.callb)
 
    def _tally(self, event, tick):
       """Increment the event callback called count."""
@@ -1317,51 +1373,57 @@ class _event:
       self.count = 0
 
 class _wait_for_edge:
-   """Encapsulates waiting for GPIO edges."""
+   """Encapsulates waiting for a GPIO edge."""
 
-   def __init__(self, notify, gpio, edge, timeout):
+   def __init__(self, notify, gpio, edge):
       """Initialises a wait_for_edge."""
       self._notify = notify
-      self.callb = _callback_ADT(gpio, edge, self.func)
-      self.trigger = False
-      self._notify.append(self.callb)
-      self.start = time.time()
-      while (self.trigger == False) and ((time.time()-self.start) < timeout):
-         time.sleep(0.05)
-      self._notify.remove(self.callb)
+      self._event = asyncio.Event()
+      self.callb = _callback_ADT(gpio, edge, self._func)
 
-   def func(self, gpio, level, tick):
-      """Sets wait_for_edge triggered."""
-      self.trigger = True
+   async def wait_for(self, timeout):
+      """Waits on the GPIO edge."""
+      await self._notify.append(self.callb)
+      try:
+         await asyncio.wait_for(self._event.wait(), timeout)
+      finally:
+         await self._notify.remove(self.callb)
+
+   def _func(self, gpio, level, tick):
+      """To be called when done waiting for edge."""
+      self._event.set()
 
 class _wait_for_event:
    """Encapsulates waiting for an event."""
 
-   def __init__(self, notify, event, timeout):
+   def __init__(self, notify, event):
       """Initialises wait_for_event."""
       self._notify = notify
-      self.callb = _event_ADT(event, self.func)
-      self.trigger = False
-      self._notify.append_event(self.callb)
-      self.start = time.time()
-      while (self.trigger == False) and ((time.time()-self.start) < timeout):
-         time.sleep(0.05)
-      self._notify.remove_event(self.callb)
+      self._event = asyncio.Event()
+      self.callb = _event_ADT(event, self._func)
 
-   def func(self, event, tick):
-      """Sets wait_for_event triggered."""
-      self.trigger = True
+   async def wait_for(self, timeout):
+      """Wait on the event."""
+      await self._notify.append(self.callb)
+      try:
+         await asyncio.wait_for(self._event.wait(), timeout)
+      finally:
+         await self._notify.remove(self.callb)
+
+   def _func(self, event, tick):
+      """To be called when done waiting for event."""
+      self._event.set()
 
 class pi():
 
-   def _rxbuf(self, count):
+   async def _rxbuf(self, count):
       """Returns count bytes from the command socket."""
-      ext = bytearray(self.sl.s.recv(count))
+      ext = bytearray(await self.sl.s.recv(count))
       while len(ext) < count:
-         ext.extend(self.sl.s.recv(count - len(ext)))
+         ext.extend(await self.sl.s.recv(count - len(ext)))
       return ext
 
-   def set_mode(self, gpio, mode):
+   async def set_mode(self, gpio, mode):
       """
       Sets the GPIO mode.
 
@@ -1369,14 +1431,14 @@ class pi():
       mode:= INPUT, OUTPUT, ALT0, ALT1, ALT2, ALT3, ALT4, ALT5.
 
       ...
-      pi.set_mode( 4, pigpio.INPUT)  # GPIO  4 as input
-      pi.set_mode(17, pigpio.OUTPUT) # GPIO 17 as output
-      pi.set_mode(24, pigpio.ALT2)   # GPIO 24 as ALT2
+      await pi.set_mode( 4, copigpio.INPUT)  # GPIO  4 as input
+      await pi.set_mode(17, copigpio.OUTPUT) # GPIO 17 as output
+      await pi.set_mode(24, copigpio.ALT2)   # GPIO 24 as ALT2
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_MODES, gpio, mode))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_MODES, gpio, mode))
 
-   def get_mode(self, gpio):
+   async def get_mode(self, gpio):
       """
       Returns the GPIO mode.
 
@@ -1396,13 +1458,13 @@ class pi():
       . .
 
       ...
-      print(pi.get_mode(0))
+      print(await pi.get_mode(0))
       4
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_MODEG, gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_MODEG, gpio, 0))
 
-   def set_pull_up_down(self, gpio, pud):
+   async def set_pull_up_down(self, gpio, pud):
       """
       Sets or clears the internal GPIO pull-up/down resistor.
 
@@ -1410,34 +1472,34 @@ class pi():
        pud:= PUD_UP, PUD_DOWN, PUD_OFF.
 
       ...
-      pi.set_pull_up_down(17, pigpio.PUD_OFF)
-      pi.set_pull_up_down(23, pigpio.PUD_UP)
-      pi.set_pull_up_down(24, pigpio.PUD_DOWN)
+      await pi.set_pull_up_down(17, copigpio.PUD_OFF)
+      await pi.set_pull_up_down(23, copigpio.PUD_UP)
+      await pi.set_pull_up_down(24, copigpio.PUD_DOWN)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PUD, gpio, pud))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PUD, gpio, pud))
 
-   def read(self, gpio):
+   async def read(self, gpio):
       """
       Returns the GPIO level.
 
       gpio:= 0-53.
 
       ...
-      pi.set_mode(23, pigpio.INPUT)
+      await pi.set_mode(23, copigpio.INPUT)
 
-      pi.set_pull_up_down(23, pigpio.PUD_DOWN)
-      print(pi.read(23))
+      await pi.set_pull_up_down(23, copigpio.PUD_DOWN)
+      print(await pi.read(23))
       0
 
-      pi.set_pull_up_down(23, pigpio.PUD_UP)
-      print(pi.read(23))
+      await pi.set_pull_up_down(23, copigpio.PUD_UP)
+      print(await pi.read(23))
       1
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_READ, gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_READ, gpio, 0))
 
-   def write(self, gpio, level):
+   async def write(self, gpio, level):
       """
       Sets the GPIO level.
 
@@ -1448,20 +1510,20 @@ class pi():
       switched off.
 
       ...
-      pi.set_mode(17, pigpio.OUTPUT)
+      await pi.set_mode(17, copigpio.OUTPUT)
 
-      pi.write(17,0)
-      print(pi.read(17))
+      await pi.write(17,0)
+      print(await pi.read(17))
       0
 
-      pi.write(17,1)
-      print(pi.read(17))
+      await pi.write(17,1)
+      print(await pi.read(17))
       1
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WRITE, gpio, level))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WRITE, gpio, level))
 
-   def set_PWM_dutycycle(self, user_gpio, dutycycle):
+   async def set_PWM_dutycycle(self, user_gpio, dutycycle):
       """
       Starts (non-zero dutycycle) or stops (0) PWM pulses on the GPIO.
 
@@ -1471,17 +1533,17 @@ class pi():
       The [*set_PWM_range*] function can change the default range of 255.
 
       ...
-      pi.set_PWM_dutycycle(4,   0) # PWM off
-      pi.set_PWM_dutycycle(4,  64) # PWM 1/4 on
-      pi.set_PWM_dutycycle(4, 128) # PWM 1/2 on
-      pi.set_PWM_dutycycle(4, 192) # PWM 3/4 on
-      pi.set_PWM_dutycycle(4, 255) # PWM full on
+      await pi.set_PWM_dutycycle(4,   0) # PWM off
+      await pi.set_PWM_dutycycle(4,  64) # PWM 1/4 on
+      await pi.set_PWM_dutycycle(4, 128) # PWM 1/2 on
+      await pi.set_PWM_dutycycle(4, 192) # PWM 3/4 on
+      await pi.set_PWM_dutycycle(4, 255) # PWM full on
       ...
       """
-      return _u2i(_pigpio_command(
+      return _u2i(await _pigpio_command(
          self.sl, _PI_CMD_PWM, user_gpio, int(dutycycle)))
 
-   def get_PWM_dutycycle(self, user_gpio):
+   async def get_PWM_dutycycle(self, user_gpio):
       """
       Returns the PWM dutycycle being used on the GPIO.
 
@@ -1500,18 +1562,18 @@ class pi():
       will be out of a 1000000 (1M).
 
       ...
-      pi.set_PWM_dutycycle(4, 25)
-      print(pi.get_PWM_dutycycle(4))
+      await pi.set_PWM_dutycycle(4, 25)
+      print(await pi.get_PWM_dutycycle(4))
       25
 
-      pi.set_PWM_dutycycle(4, 203)
-      print(pi.get_PWM_dutycycle(4))
+      await pi.set_PWM_dutycycle(4, 203)
+      print(await pi.get_PWM_dutycycle(4))
       203
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_GDC, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_GDC, user_gpio, 0))
 
-   def set_PWM_range(self, user_gpio, range_):
+   async def set_PWM_range(self, user_gpio, range_):
       """
       Sets the range of PWM values to be used on the GPIO.
 
@@ -1519,14 +1581,14 @@ class pi():
          range_:= 25-40000.
 
       ...
-      pi.set_PWM_range(9, 100)  # now  25 1/4,   50 1/2,   75 3/4 on
-      pi.set_PWM_range(9, 500)  # now 125 1/4,  250 1/2,  375 3/4 on
-      pi.set_PWM_range(9, 3000) # now 750 1/4, 1500 1/2, 2250 3/4 on
+      await pi.set_PWM_range(9, 100)  # now  25 1/4,   50 1/2,   75 3/4 on
+      await pi.set_PWM_range(9, 500)  # now 125 1/4,  250 1/2,  375 3/4 on
+      await pi.set_PWM_range(9, 3000) # now 750 1/4, 1500 1/2, 2250 3/4 on
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PRS, user_gpio, range_))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PRS, user_gpio, range_))
 
-   def get_PWM_range(self, user_gpio):
+   async def get_PWM_range(self, user_gpio):
       """
       Returns the range of PWM values being used on the GPIO.
 
@@ -1536,14 +1598,14 @@ class pi():
       the reported range will be 1000000 (1M).
 
       ...
-      pi.set_PWM_range(9, 500)
-      print(pi.get_PWM_range(9))
+      await pi.set_PWM_range(9, 500)
+      print(await pi.get_PWM_range(9))
       500
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PRG, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PRG, user_gpio, 0))
 
-   def get_PWM_real_range(self, user_gpio):
+   async def get_PWM_real_range(self, user_gpio):
       """
       Returns the real (underlying) range of PWM values being
       used on the GPIO.
@@ -1557,14 +1619,14 @@ class pi():
       will be approximately 250M divided by the set PWM frequency.
 
       ...
-      pi.set_PWM_frequency(4, 800)
-      print(pi.get_PWM_real_range(4))
+      await pi.set_PWM_frequency(4, 800)
+      print(await pi.get_PWM_real_range(4))
       250
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PRRG, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PRRG, user_gpio, 0))
 
-   def set_PWM_frequency(self, user_gpio, frequency):
+   async def set_PWM_frequency(self, user_gpio, frequency):
       """
       Sets the frequency (in Hz) of the PWM to be used on the GPIO.
 
@@ -1610,19 +1672,19 @@ class pi():
       . .
 
       ...
-      pi.set_PWM_frequency(4,0)
-      print(pi.get_PWM_frequency(4))
+      await pi.set_PWM_frequency(4,0)
+      print(await pi.get_PWM_frequency(4))
       10
 
-      pi.set_PWM_frequency(4,100000)
-      print(pi.get_PWM_frequency(4))
+      await pi.set_PWM_frequency(4,100000)
+      print(await pi.get_PWM_frequency(4))
       8000
       ...
       """
       return _u2i(
-         _pigpio_command(self.sl, _PI_CMD_PFS, user_gpio, frequency))
+         await _pigpio_command(self.sl, _PI_CMD_PFS, user_gpio, frequency))
 
-   def get_PWM_frequency(self, user_gpio):
+   async def get_PWM_frequency(self, user_gpio):
       """
       Returns the frequency of PWM being used on the GPIO.
 
@@ -1640,18 +1702,18 @@ class pi():
       will be that set by [*hardware_PWM*].
 
       ...
-      pi.set_PWM_frequency(4,0)
-      print(pi.get_PWM_frequency(4))
+      await pi.set_PWM_frequency(4,0)
+      print(await pi.get_PWM_frequency(4))
       10
 
-      pi.set_PWM_frequency(4, 800)
-      print(pi.get_PWM_frequency(4))
+      await pi.set_PWM_frequency(4, 800)
+      print(await pi.get_PWM_frequency(4))
       800
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PFG, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PFG, user_gpio, 0))
 
-   def set_servo_pulsewidth(self, user_gpio, pulsewidth):
+   async def set_servo_pulsewidth(self, user_gpio, pulsewidth):
       """
       Starts (500-2500) or stops (0) servo pulses on the GPIO.
 
@@ -1670,16 +1732,16 @@ class pi():
       limits.
 
       ...
-      pi.set_servo_pulsewidth(17, 0)    # off
-      pi.set_servo_pulsewidth(17, 1000) # safe anti-clockwise
-      pi.set_servo_pulsewidth(17, 1500) # centre
-      pi.set_servo_pulsewidth(17, 2000) # safe clockwise
+      await pi.set_servo_pulsewidth(17, 0)    # off
+      await pi.set_servo_pulsewidth(17, 1000) # safe anti-clockwise
+      await pi.set_servo_pulsewidth(17, 1500) # centre
+      await pi.set_servo_pulsewidth(17, 2000) # safe clockwise
       ...
    """
-      return _u2i(_pigpio_command(
+      return _u2i(await _pigpio_command(
          self.sl, _PI_CMD_SERVO, user_gpio, int(pulsewidth)))
 
-   def get_servo_pulsewidth(self, user_gpio):
+   async def get_servo_pulsewidth(self, user_gpio):
       """
       Returns the servo pulsewidth being used on the GPIO.
 
@@ -1688,18 +1750,18 @@ class pi():
       Returns the servo pulsewidth.
 
       ...
-      pi.set_servo_pulsewidth(4, 525)
-      print(pi.get_servo_pulsewidth(4))
+      await pi.set_servo_pulsewidth(4, 525)
+      print(await pi.get_servo_pulsewidth(4))
       525
 
-      pi.set_servo_pulsewidth(4, 2130)
-      print(pi.get_servo_pulsewidth(4))
+      await pi.set_servo_pulsewidth(4, 2130)
+      print(await pi.get_servo_pulsewidth(4))
       2130
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_GPW, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_GPW, user_gpio, 0))
 
-   def notify_open(self):
+   async def notify_open(self):
       """
       Returns a notification handle (>=0).
 
@@ -1750,14 +1812,14 @@ class pi():
       then GPIO x is high.
 
       ...
-      h = pi.notify_open()
+      h = await pi.notify_open()
       if h >= 0:
-         pi.notify_begin(h, 1234)
+         await pi.notify_begin(h, 1234)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_NO, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_NO, 0, 0))
 
-   def notify_begin(self, handle, bits):
+   async def notify_begin(self, handle, bits):
       """
       Starts notifications on a handle.
 
@@ -1771,14 +1833,14 @@ class pi():
       6, 7, and 10 (1234 = 0x04D2 = 0b0000010011010010).
 
       ...
-      h = pi.notify_open()
+      h = await pi.notify_open()
       if h >= 0:
-         pi.notify_begin(h, 1234)
+         await pi.notify_begin(h, 1234)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_NB, handle, bits))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_NB, handle, bits))
 
-   def notify_pause(self, handle):
+   async def notify_pause(self, handle):
       """
       Pauses notifications on a handle.
 
@@ -1788,36 +1850,36 @@ class pi():
       [*notify_begin*] is called again.
 
       ...
-      h = pi.notify_open()
+      h = await pi.notify_open()
       if h >= 0:
-         pi.notify_begin(h, 1234)
+         await pi.notify_begin(h, 1234)
          ...
-         pi.notify_pause(h)
+         await pi.notify_pause(h)
          ...
-         pi.notify_begin(h, 1234)
+         await pi.notify_begin(h, 1234)
          ...
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_NB, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_NB, handle, 0))
 
-   def notify_close(self, handle):
+   async def notify_close(self, handle):
       """
       Stops notifications on a handle and releases the handle for reuse.
 
       handle:= >=0 (as returned by a prior call to [*notify_open*])
 
       ...
-      h = pi.notify_open()
+      h = await pi.notify_open()
       if h >= 0:
-         pi.notify_begin(h, 1234)
+         await pi.notify_begin(h, 1234)
          ...
-         pi.notify_close(h)
+         await pi.notify_close(h)
          ...
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_NC, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_NC, handle, 0))
 
-   def set_watchdog(self, user_gpio, wdog_timeout):
+   async def set_watchdog(self, user_gpio, wdog_timeout):
       """
       Sets a watchdog timeout for a GPIO.
 
@@ -1837,14 +1899,14 @@ class pi():
       The callback will receive the special level TIMEOUT.
 
       ...
-      pi.set_watchdog(23, 1000) # 1000 ms watchdog on GPIO 23
-      pi.set_watchdog(23, 0)    # cancel watchdog on GPIO 23
+      await pi.set_watchdog(23, 1000) # 1000 ms watchdog on GPIO 23
+      await pi.set_watchdog(23, 0)    # cancel watchdog on GPIO 23
       ...
       """
-      return _u2i(_pigpio_command(
+      return _u2i(await _pigpio_command(
          self.sl, _PI_CMD_WDOG, user_gpio, int(wdog_timeout)))
 
-   def read_bank_1(self):
+   async def read_bank_1(self):
       """
       Returns the levels of the bank 1 GPIO (GPIO 0-31).
 
@@ -1852,13 +1914,13 @@ class pi():
       GPIO is high.  GPIO n has bit value (1<<n).
 
       ...
-      print(bin(pi.read_bank_1()))
+      print(bin(await pi.read_bank_1()))
       0b10010100000011100100001001111
       ...
       """
-      return _pigpio_command(self.sl, _PI_CMD_BR1, 0, 0)
+      return await _pigpio_command(self.sl, _PI_CMD_BR1, 0, 0)
 
-   def read_bank_2(self):
+   async def read_bank_2(self):
       """
       Returns the levels of the bank 2 GPIO (GPIO 32-53).
 
@@ -1866,13 +1928,13 @@ class pi():
       GPIO is high.  GPIO n has bit value (1<<(n-32)).
 
       ...
-      print(bin(pi.read_bank_2()))
+      print(bin(await pi.read_bank_2()))
       0b1111110000000000000000
       ...
       """
-      return _pigpio_command(self.sl, _PI_CMD_BR2, 0, 0)
+      return await _pigpio_command(self.sl, _PI_CMD_BR2, 0, 0)
 
-   def clear_bank_1(self, bits):
+   async def clear_bank_1(self, bits):
       """
       Clears GPIO 0-31 if the corresponding bit in bits is set.
 
@@ -1883,12 +1945,12 @@ class pi():
       is not allowed to write to one or more of the GPIO.
 
       ...
-      pi.clear_bank_1(int("111110010000",2))
+      await pi.clear_bank_1(int("111110010000",2))
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BC1, bits, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BC1, bits, 0))
 
-   def clear_bank_2(self, bits):
+   async def clear_bank_2(self, bits):
       """
       Clears GPIO 32-53 if the corresponding bit (0-21) in bits is set.
 
@@ -1899,12 +1961,12 @@ class pi():
       is not allowed to write to one or more of the GPIO.
 
       ...
-      pi.clear_bank_2(0x1010)
+      await pi.clear_bank_2(0x1010)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BC2, bits, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BC2, bits, 0))
 
-   def set_bank_1(self, bits):
+   async def set_bank_1(self, bits):
       """
       Sets GPIO 0-31 if the corresponding bit in bits is set.
 
@@ -1915,12 +1977,12 @@ class pi():
       is not allowed to write to one or more of the GPIO.
 
       ...
-      pi.set_bank_1(int("111110010000",2))
+      await pi.set_bank_1(int("111110010000",2))
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BS1, bits, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BS1, bits, 0))
 
-   def set_bank_2(self, bits):
+   async def set_bank_2(self, bits):
       """
       Sets GPIO 32-53 if the corresponding bit (0-21) in bits is set.
 
@@ -1931,12 +1993,12 @@ class pi():
       is not allowed to write to one or more of the GPIO.
 
       ...
-      pi.set_bank_2(0x303)
+      await pi.set_bank_2(0x303)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BS2, bits, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BS2, bits, 0))
 
-   def hardware_clock(self, gpio, clkfreq):
+   async def hardware_clock(self, gpio, clkfreq):
       """
       Starts a hardware clock on a GPIO at the specified frequency.
       Frequencies above 30MHz are unlikely to work.
@@ -1972,14 +2034,14 @@ class pi():
       with the GPIO number.
 
       ...
-      pi.hardware_clock(4, 5000) # 5 KHz clock on GPIO 4
+      await pi.hardware_clock(4, 5000) # 5 KHz clock on GPIO 4
 
-      pi.hardware_clock(4, 40000000) # 40 MHz clock on GPIO 4
+      await pi.hardware_clock(4, 40000000) # 40 MHz clock on GPIO 4
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_HC, gpio, clkfreq))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_HC, gpio, clkfreq))
 
-   def hardware_PWM(self, gpio, PWMfreq, PWMduty):
+   async def hardware_PWM(self, gpio, PWMfreq, PWMduty):
       """
       Starts hardware PWM on a GPIO at the specified frequency
       and dutycycle. Frequencies above 30MHz are unlikely to work.
@@ -2029,9 +2091,9 @@ class pi():
       PWMduty is automatically scaled to take this into account.
 
       ...
-      pi.hardware_PWM(18, 800, 250000) # 800Hz 25% dutycycle
+      await pi.hardware_PWM(18, 800, 250000) # 800Hz 25% dutycycle
 
-      pi.hardware_PWM(18, 2000, 750000) # 2000Hz 75% dutycycle
+      await pi.hardware_PWM(18, 2000, 750000) # 2000Hz 75% dutycycle
       ...
       """
       # pigpio message format
@@ -2042,11 +2104,11 @@ class pi():
       ## extension ##
       # I PWMdutycycle
       extents = [struct.pack("I", PWMduty)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_HP, gpio, PWMfreq, 4, extents))
 
 
-   def get_current_tick(self):
+   async def get_current_tick(self):
       """
       Returns the current system tick.
 
@@ -2055,14 +2117,14 @@ class pi():
       every 71.6 minutes.
 
       ...
-      t1 = pi.get_current_tick()
-      time.sleep(1)
-      t2 = pi.get_current_tick()
+      t1 = await pi.get_current_tick()
+      await asyncio.sleep(1)
+      t2 = await pi.get_current_tick()
       ...
       """
-      return _pigpio_command(self.sl, _PI_CMD_TICK, 0, 0)
+      return await _pigpio_command(self.sl, _PI_CMD_TICK, 0, 0)
 
-   def get_hardware_revision(self):
+   async def get_hardware_revision(self):
       """
       Returns the Pi's hardware revision number.
 
@@ -2084,34 +2146,34 @@ class pi():
       hexadecimal number the function returns 0.
 
       ...
-      print(pi.get_hardware_revision())
+      print(await pi.get_hardware_revision())
       2
       ...
       """
-      return _pigpio_command(self.sl, _PI_CMD_HWVER, 0, 0)
+      return await _pigpio_command(self.sl, _PI_CMD_HWVER, 0, 0)
 
-   def get_pigpio_version(self):
+   async def get_pigpio_version(self):
       """
       Returns the pigpio software version.
 
       ...
-      v = pi.get_pigpio_version()
+      v = await pi.get_pigpio_version()
       ...
       """
-      return _pigpio_command(self.sl, _PI_CMD_PIGPV, 0, 0)
+      return await _pigpio_command(self.sl, _PI_CMD_PIGPV, 0, 0)
 
-   def wave_clear(self):
+   async def wave_clear(self):
       """
       Clears all waveforms and any data added by calls to the
       [*wave_add_**] functions.
 
       ...
-      pi.wave_clear()
+      await pi.wave_clear()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVCLR, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVCLR, 0, 0))
 
-   def wave_add_new(self):
+   async def wave_add_new(self):
       """
       Starts a new empty waveform.
 
@@ -2120,12 +2182,12 @@ class pi():
       [*wave_create*] function.
 
       ...
-      pi.wave_add_new()
+      await pi.wave_add_new()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVNEW, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVNEW, 0, 0))
 
-   def wave_add_generic(self, pulses):
+   async def wave_add_generic(self, pulses):
       """
       Adds a list of pulses to the current waveform.
 
@@ -2147,43 +2209,43 @@ class pi():
       G1=4
       G2=24
 
-      pi.set_mode(G1, pigpio.OUTPUT)
-      pi.set_mode(G2, pigpio.OUTPUT)
+      await pi.set_mode(G1, copigpio.OUTPUT)
+      await pi.set_mode(G2, copigpio.OUTPUT)
 
       flash_500=[] # flash every 500 ms
       flash_100=[] # flash every 100 ms
 
       #                              ON     OFF  DELAY
 
-      flash_500.append(pigpio.pulse(1<<G1, 1<<G2, 500000))
-      flash_500.append(pigpio.pulse(1<<G2, 1<<G1, 500000))
+      flash_500.append(copigpio.pulse(1<<G1, 1<<G2, 500000))
+      flash_500.append(copigpio.pulse(1<<G2, 1<<G1, 500000))
 
-      flash_100.append(pigpio.pulse(1<<G1, 1<<G2, 100000))
-      flash_100.append(pigpio.pulse(1<<G2, 1<<G1, 100000))
+      flash_100.append(copigpio.pulse(1<<G1, 1<<G2, 100000))
+      flash_100.append(copigpio.pulse(1<<G2, 1<<G1, 100000))
 
-      pi.wave_clear() # clear any existing waveforms
+      await pi.wave_clear() # clear any existing waveforms
 
-      pi.wave_add_generic(flash_500) # 500 ms flashes
-      f500 = pi.wave_create() # create and save id
+      await pi.wave_add_generic(flash_500) # 500 ms flashes
+      f500 = await pi.wave_create() # create and save id
 
-      pi.wave_add_generic(flash_100) # 100 ms flashes
-      f100 = pi.wave_create() # create and save id
+      await pi.wave_add_generic(flash_100) # 100 ms flashes
+      f100 = await pi.wave_create() # create and save id
 
-      pi.wave_send_repeat(f500)
+      await pi.wave_send_repeat(f500)
 
-      time.sleep(4)
+      await asyncio.sleep(4)
 
-      pi.wave_send_repeat(f100)
+      await pi.wave_send_repeat(f100)
 
-      time.sleep(4)
+      await asyncio.sleep(4)
 
-      pi.wave_send_repeat(f500)
+      await pi.wave_send_repeat(f500)
 
-      time.sleep(4)
+      await asyncio.sleep(4)
 
-      pi.wave_tx_stop() # stop waveform
+      await pi.wave_tx_stop() # stop waveform
 
-      pi.wave_clear() # clear all waveforms
+      await pi.wave_clear() # clear all waveforms
       ...
       """
       # pigpio message format
@@ -2198,12 +2260,12 @@ class pi():
          for p in pulses:
             ext.extend(struct.pack("III", p.gpio_on, p.gpio_off, p.delay))
          extents = [ext]
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_WVAG, 0, 0, len(pulses)*12, extents))
       else:
          return 0
 
-   def wave_add_serial(
+   async def wave_add_serial(
       self, user_gpio, baud, data, offset=0, bb_bits=8, bb_stop=2):
       """
       Adds a waveform representing serial data to the existing
@@ -2234,13 +2296,13 @@ class pi():
       For [*bb_bits*] 17-32 there will be four bytes per character.
 
       ...
-      pi.wave_add_serial(4, 300, 'Hello world')
+      await pi.wave_add_serial(4, 300, 'Hello world')
 
-      pi.wave_add_serial(4, 300, b"Hello world")
+      await pi.wave_add_serial(4, 300, b"Hello world")
 
-      pi.wave_add_serial(4, 300, b'\\x23\\x01\\x00\\x45')
+      await pi.wave_add_serial(4, 300, b'\\x23\\x01\\x00\\x45')
 
-      pi.wave_add_serial(17, 38400, [23, 128, 234], 5000)
+      await pi.wave_add_serial(17, 38400, [23, 128, 234], 5000)
       ...
       """
       # pigpio message format
@@ -2255,12 +2317,12 @@ class pi():
       # s len data bytes
       if len(data):
          extents = [struct.pack("III", bb_bits, bb_stop, offset), data]
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_WVAS, user_gpio, baud, len(data)+12, extents))
       else:
          return 0
 
-   def wave_create(self):
+   async def wave_create(self):
       """
       Creates a waveform from the data provided by the prior calls
       to the [*wave_add_**] functions.
@@ -2302,12 +2364,12 @@ class pi():
       the specified delay between the pulse and the next.
 
       ...
-      wid = pi.wave_create()
+      wid = await pi.wave_create()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVCRE, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVCRE, 0, 0))
 
-   def wave_create_and_pad(self, percent):
+   async def wave_create_and_pad(self, percent):
       """
       This function creates a waveform like [*wave_create*] but pads the consumed
       resources. Where percent gives the percentage of the resources to use
@@ -2347,12 +2409,12 @@ class pi():
               can be created in its place.
 
       ...
-      wid = pi.wave_create_and_pad(50)
+      wid = await pi.wave_create_and_pad(50)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVCAP, percent, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVCAP, percent, 0))
 
-   def wave_delete(self, wave_id):
+   async def wave_delete(self, wave_id):
       """
       This function deletes the waveform with id wave_id.
 
@@ -2370,30 +2432,30 @@ class pi():
       the current wave (see the C source for gpioWaveCreate for details).
 
       ...
-      pi.wave_delete(6) # delete waveform with id 6
+      await pi.wave_delete(6) # delete waveform with id 6
 
-      pi.wave_delete(0) # delete waveform with id 0
+      await pi.wave_delete(0) # delete waveform with id 0
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVDEL, wave_id, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVDEL, wave_id, 0))
 
-   def wave_tx_start(self): # DEPRECATED
+   async def wave_tx_start(self): # DEPRECATED
       """
       This function is deprecated and has been removed.
 
       Use [*wave_create*]/[*wave_send_**] instead.
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVGO, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVGO, 0, 0))
 
-   def wave_tx_repeat(self): # DEPRECATED
+   async def wave_tx_repeat(self): # DEPRECATED
       """
       This function is deprecated and has beeen removed.
 
       Use [*wave_create*]/[*wave_send_**] instead.
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVGOR, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVGOR, 0, 0))
 
-   def wave_send_once(self, wave_id):
+   async def wave_send_once(self, wave_id):
       """
       Transmits the waveform with id wave_id.  The waveform is sent
       once.
@@ -2406,12 +2468,12 @@ class pi():
       Returns the number of DMA control blocks used in the waveform.
 
       ...
-      cbs = pi.wave_send_once(wid)
+      cbs = await pi.wave_send_once(wid)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVTX, wave_id, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVTX, wave_id, 0))
 
-   def wave_send_repeat(self, wave_id):
+   async def wave_send_repeat(self, wave_id):
       """
       Transmits the waveform with id wave_id.  The waveform repeats
       until wave_tx_stop is called or another call to [*wave_send_**]
@@ -2425,12 +2487,12 @@ class pi():
       Returns the number of DMA control blocks used in the waveform.
 
       ...
-      cbs = pi.wave_send_repeat(wid)
+      cbs = await pi.wave_send_repeat(wid)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVTXR, wave_id, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVTXR, wave_id, 0))
 
-   def wave_send_using_mode(self, wave_id, mode):
+   async def wave_send_using_mode(self, wave_id, mode):
       """
       Transmits the waveform with id wave_id using mode mode.
 
@@ -2459,12 +2521,12 @@ class pi():
       Returns the number of DMA control blocks used in the waveform.
 
       ...
-      cbs = pi.wave_send_using_mode(wid, WAVE_MODE_REPEAT_SYNC)
+      cbs = await pi.wave_send_using_mode(wid, WAVE_MODE_REPEAT_SYNC)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVTXM, wave_id, mode))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVTXM, wave_id, mode))
 
-   def wave_tx_at(self):
+   async def wave_tx_at(self):
       """
       Returns the id of the waveform currently being
       transmitted using [*wave_send**].  Chained waves are not supported.
@@ -2476,28 +2538,28 @@ class pi():
       NO_TX_WAVE (9999) - no wave being transmitted.
 
       ...
-      wid = pi.wave_tx_at()
+      wid = await pi.wave_tx_at()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVTAT, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVTAT, 0, 0))
 
-   def wave_tx_busy(self):
+   async def wave_tx_busy(self):
       """
       Returns 1 if a waveform is currently being transmitted,
       otherwise 0.
 
       ...
-      pi.wave_send_once(0) # send first waveform
+      await pi.wave_send_once(0) # send first waveform
 
-      while pi.wave_tx_busy(): # wait for waveform to be sent
-         time.sleep(0.1)
+      while await pi.wave_tx_busy(): # wait for waveform to be sent
+         await asyncio.sleep(0.1)
 
-      pi.wave_send_once(1) # send next waveform
+      await pi.wave_send_once(1) # send next waveform
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVBSY, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVBSY, 0, 0))
 
-   def wave_tx_stop(self):
+   async def wave_tx_stop(self):
       """
       Stops the transmission of the current waveform.
 
@@ -2505,16 +2567,16 @@ class pi():
       wave_send_repeat.
 
       ...
-      pi.wave_send_repeat(3)
+      await pi.wave_send_repeat(3)
 
-      time.sleep(5)
+      await asyncio.sleep(5)
 
-      pi.wave_tx_stop()
+      await pi.wave_tx_stop()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVHLT, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVHLT, 0, 0))
 
-   def wave_chain(self, data):
+   async def wave_chain(self, data):
       """
       This function transmits a chain of waveforms.
 
@@ -2555,50 +2617,53 @@ class pi():
       ...
       #!/usr/bin/env python
 
-      import time
-      import pigpio
+      import asyncio
+      import copigpio
 
       WAVES=5
       GPIO=4
 
       wid=[0]*WAVES
 
-      pi = pigpio.pi() # Connect to local Pi.
+      async def main(pi):
+         await pi.connect() # Connect to local Pi.
+         await pi.set_mode(GPIO, copigpio.OUTPUT);
 
-      pi.set_mode(GPIO, pigpio.OUTPUT);
+         for i in range(WAVES):
+            await pi.wave_add_generic([
+               copigpio.pulse(1<<GPIO, 0, 20),
+               copigpio.pulse(0, 1<<GPIO, (i+1)*200)]);
 
-      for i in range(WAVES):
-         pi.wave_add_generic([
-            pigpio.pulse(1<<GPIO, 0, 20),
-            pigpio.pulse(0, 1<<GPIO, (i+1)*200)]);
+            wid[i] = await pi.wave_create();
 
-         wid[i] = pi.wave_create();
+         await pi.wave_chain([
+            wid[4], wid[3], wid[2],       # transmit waves 4+3+2
+            255, 0,                       # loop start
+               wid[0], wid[0], wid[0],    # transmit waves 0+0+0
+               255, 0,                    # loop start
+                  wid[0], wid[1],         # transmit waves 0+1
+                  255, 2, 0x88, 0x13,     # delay 5000us
+               255, 1, 30, 0,             # loop end (repeat 30 times)
+               255, 0,                    # loop start
+                  wid[2], wid[3], wid[0], # transmit waves 2+3+0
+                  wid[3], wid[1], wid[2], # transmit waves 3+1+2
+               255, 1, 10, 0,             # loop end (repeat 10 times)
+            255, 1, 5, 0,                 # loop end (repeat 5 times)
+            wid[4], wid[4], wid[4],       # transmit waves 4+4+4
+            255, 2, 0x20, 0x4E,           # delay 20000us
+            wid[0], wid[0], wid[0],       # transmit waves 0+0+0
+            ])
 
-      pi.wave_chain([
-         wid[4], wid[3], wid[2],       # transmit waves 4+3+2
-         255, 0,                       # loop start
-            wid[0], wid[0], wid[0],    # transmit waves 0+0+0
-            255, 0,                    # loop start
-               wid[0], wid[1],         # transmit waves 0+1
-               255, 2, 0x88, 0x13,     # delay 5000us
-            255, 1, 30, 0,             # loop end (repeat 30 times)
-            255, 0,                    # loop start
-               wid[2], wid[3], wid[0], # transmit waves 2+3+0
-               wid[3], wid[1], wid[2], # transmit waves 3+1+2
-            255, 1, 10, 0,             # loop end (repeat 10 times)
-         255, 1, 5, 0,                 # loop end (repeat 5 times)
-         wid[4], wid[4], wid[4],       # transmit waves 4+4+4
-         255, 2, 0x20, 0x4E,           # delay 20000us
-         wid[0], wid[0], wid[0],       # transmit waves 0+0+0
-         ])
+         while await pi.wave_tx_busy():
+            asyncio.sleep(0.1);
 
-      while pi.wave_tx_busy():
-         time.sleep(0.1);
+         for i in range(WAVES):
+            await pi.wave_delete(wid[i])
 
-      for i in range(WAVES):
-         pi.wave_delete(wid[i])
+         await pi.stop()
 
-      pi.stop()
+      pi = copigpio.pi()
+      asyncio.run_until_complete(main(pi))
       ...
       """
       # I p1 0
@@ -2607,73 +2672,73 @@ class pi():
       ## extension ##
       # s len data bytes
 
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_WVCHA, 0, 0, len(data), [data]))
 
 
-   def wave_get_micros(self):
+   async def wave_get_micros(self):
       """
       Returns the length in microseconds of the current waveform.
 
       ...
-      micros = pi.wave_get_micros()
+      micros = await pi.wave_get_micros()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSM, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSM, 0, 0))
 
-   def wave_get_max_micros(self):
+   async def wave_get_max_micros(self):
       """
       Returns the maximum possible size of a waveform in microseconds.
 
       ...
-      micros = pi.wave_get_max_micros()
+      micros = await pi.wave_get_max_micros()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSM, 2, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSM, 2, 0))
 
-   def wave_get_pulses(self):
+   async def wave_get_pulses(self):
       """
       Returns the length in pulses of the current waveform.
 
       ...
-      pulses = pi.wave_get_pulses()
+      pulses = await pi.wave_get_pulses()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSP, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSP, 0, 0))
 
-   def wave_get_max_pulses(self):
+   async def wave_get_max_pulses(self):
       """
       Returns the maximum possible size of a waveform in pulses.
 
       ...
-      pulses = pi.wave_get_max_pulses()
+      pulses = await pi.wave_get_max_pulses()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSP, 2, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSP, 2, 0))
 
-   def wave_get_cbs(self):
+   async def wave_get_cbs(self):
       """
       Returns the length in DMA control blocks of the current
       waveform.
 
       ...
-      cbs = pi.wave_get_cbs()
+      cbs = await pi.wave_get_cbs()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSC, 0, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSC, 0, 0))
 
-   def wave_get_max_cbs(self):
+   async def wave_get_max_cbs(self):
       """
       Returns the maximum possible size of a waveform in DMA
       control blocks.
 
       ...
-      cbs = pi.wave_get_max_cbs()
+      cbs = await pi.wave_get_max_cbs()
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_WVSC, 2, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_WVSC, 2, 0))
 
-   def i2c_open(self, i2c_bus, i2c_address, i2c_flags=0):
+   async def i2c_open(self, i2c_bus, i2c_address, i2c_flags=0):
       """
       Returns a handle (>=0) for the device at the I2C bus address.
 
@@ -2709,7 +2774,7 @@ class pi():
       . .
 
       ...
-      h = pi.i2c_open(1, 0x53) # open device at address 0x53 on bus 1
+      h = await pi.i2c_open(1, 0x53) # open device at address 0x53 on bus 1
       ...
       """
       # I p1 i2c_bus
@@ -2718,22 +2783,22 @@ class pi():
       ## extension ##
       # I i2c_flags
       extents = [struct.pack("I", i2c_flags)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_I2CO, i2c_bus, i2c_address, 4, extents))
 
-   def i2c_close(self, handle):
+   async def i2c_close(self, handle):
       """
       Closes the I2C device associated with handle.
 
       handle:= >=0 (as returned by a prior call to [*i2c_open*]).
 
       ...
-      pi.i2c_close(h)
+      await pi.i2c_close(h)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_I2CC, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_I2CC, handle, 0))
 
-   def i2c_write_quick(self, handle, bit):
+   async def i2c_write_quick(self, handle, bit):
       """
       Sends a single bit to the device associated with handle.
 
@@ -2746,13 +2811,13 @@ class pi():
       . .
 
       ...
-      pi.i2c_write_quick(0, 1) # send 1 to device 0
-      pi.i2c_write_quick(3, 0) # send 0 to device 3
+      await pi.i2c_write_quick(0, 1) # send 1 to device 0
+      await pi.i2c_write_quick(3, 0) # send 0 to device 3
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_I2CWQ, handle, bit))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_I2CWQ, handle, bit))
 
-   def i2c_write_byte(self, handle, byte_val):
+   async def i2c_write_byte(self, handle, byte_val):
       """
       Sends a single byte to the device associated with handle.
 
@@ -2765,14 +2830,14 @@ class pi():
       . .
 
       ...
-      pi.i2c_write_byte(1, 17)   # send byte   17 to device 1
-      pi.i2c_write_byte(2, 0x23) # send byte 0x23 to device 2
+      await pi.i2c_write_byte(1, 17)   # send byte   17 to device 1
+      await pi.i2c_write_byte(2, 0x23) # send byte 0x23 to device 2
       ...
       """
       return _u2i(
-         _pigpio_command(self.sl, _PI_CMD_I2CWS, handle, byte_val))
+         await _pigpio_command(self.sl, _PI_CMD_I2CWS, handle, byte_val))
 
-   def i2c_read_byte(self, handle):
+   async def i2c_read_byte(self, handle):
       """
       Reads a single byte from the device associated with handle.
 
@@ -2784,12 +2849,12 @@ class pi():
       . .
 
       ...
-      b = pi.i2c_read_byte(2) # read a byte from device 2
+      b = await pi.i2c_read_byte(2) # read a byte from device 2
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_I2CRS, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_I2CRS, handle, 0))
 
-   def i2c_write_byte_data(self, handle, reg, byte_val):
+   async def i2c_write_byte_data(self, handle, reg, byte_val):
       """
       Writes a single byte to the specified register of the device
       associated with handle.
@@ -2805,10 +2870,10 @@ class pi():
 
       ...
       # send byte 0xC5 to reg 2 of device 1
-      pi.i2c_write_byte_data(1, 2, 0xC5)
+      await pi.i2c_write_byte_data(1, 2, 0xC5)
 
       # send byte 9 to reg 4 of device 2
-      pi.i2c_write_byte_data(2, 4, 9)
+      await pi.i2c_write_byte_data(2, 4, 9)
       ...
       """
       # I p1 handle
@@ -2817,10 +2882,10 @@ class pi():
       ## extension ##
       # I byte_val
       extents = [struct.pack("I", byte_val)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_I2CWB, handle, reg, 4, extents))
 
-   def i2c_write_word_data(self, handle, reg, word_val):
+   async def i2c_write_word_data(self, handle, reg, word_val):
       """
       Writes a single 16 bit word to the specified register of the
       device associated with handle.
@@ -2836,10 +2901,10 @@ class pi():
 
       ...
       # send word 0xA0C5 to reg 5 of device 4
-      pi.i2c_write_word_data(4, 5, 0xA0C5)
+      await pi.i2c_write_word_data(4, 5, 0xA0C5)
 
       # send word 2 to reg 2 of device 5
-      pi.i2c_write_word_data(5, 2, 23)
+      await pi.i2c_write_word_data(5, 2, 23)
       ...
       """
       # I p1 handle
@@ -2848,10 +2913,10 @@ class pi():
       ## extension ##
       # I word_val
       extents = [struct.pack("I", word_val)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_I2CWW, handle, reg, 4, extents))
 
-   def i2c_read_byte_data(self, handle, reg):
+   async def i2c_read_byte_data(self, handle, reg):
       """
       Reads a single byte from the specified register of the device
       associated with handle.
@@ -2866,15 +2931,15 @@ class pi():
 
       ...
       # read byte from reg 17 of device 2
-      b = pi.i2c_read_byte_data(2, 17)
+      b = await pi.i2c_read_byte_data(2, 17)
 
       # read byte from reg  1 of device 0
-      b = pi.i2c_read_byte_data(0, 1)
+      b = await pi.i2c_read_byte_data(0, 1)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_I2CRB, handle, reg))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_I2CRB, handle, reg))
 
-   def i2c_read_word_data(self, handle, reg):
+   async def i2c_read_word_data(self, handle, reg):
       """
       Reads a single 16 bit word from the specified register of the
       device associated with handle.
@@ -2889,15 +2954,15 @@ class pi():
 
       ...
       # read word from reg 2 of device 3
-      w = pi.i2c_read_word_data(3, 2)
+      w = await pi.i2c_read_word_data(3, 2)
 
       # read word from reg 7 of device 2
-      w = pi.i2c_read_word_data(2, 7)
+      w = await pi.i2c_read_word_data(2, 7)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_I2CRW, handle, reg))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_I2CRW, handle, reg))
 
-   def i2c_process_call(self, handle, reg, word_val):
+   async def i2c_process_call(self, handle, reg, word_val):
       """
       Writes 16 bits of data to the specified register of the device
       associated with handle and reads 16 bits of data in return.
@@ -2913,8 +2978,8 @@ class pi():
       . .
 
       ...
-      r = pi.i2c_process_call(h, 4, 0x1231)
-      r = pi.i2c_process_call(h, 6, 0)
+      r = await pi.i2c_process_call(h, 4, 0x1231)
+      r = await pi.i2c_process_call(h, 6, 0)
       ...
       """
       # I p1 handle
@@ -2923,10 +2988,10 @@ class pi():
       ## extension ##
       # I word_val
       extents = [struct.pack("I", word_val)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_I2CPC, handle, reg, 4, extents))
 
-   def i2c_write_block_data(self, handle, reg, data):
+   async def i2c_write_block_data(self, handle, reg, data):
       """
       Writes up to 32 bytes to the specified register of the device
       associated with handle.
@@ -2942,13 +3007,13 @@ class pi():
       . .
 
       ...
-      pi.i2c_write_block_data(4, 5, b'hello')
+      await pi.i2c_write_block_data(4, 5, b'hello')
 
-      pi.i2c_write_block_data(4, 5, "data bytes")
+      await pi.i2c_write_block_data(4, 5, "data bytes")
 
-      pi.i2c_write_block_data(5, 0, b'\\x00\\x01\\x22')
+      await pi.i2c_write_block_data(5, 0, b'\\x00\\x01\\x22')
 
-      pi.i2c_write_block_data(6, 2, [0, 1, 0x22])
+      await pi.i2c_write_block_data(6, 2, [0, 1, 0x22])
       ...
       """
       # I p1 handle
@@ -2957,12 +3022,12 @@ class pi():
       ## extension ##
       # s len data bytes
       if len(data):
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_I2CWK, handle, reg, len(data), [data]))
       else:
          return 0
 
-   def i2c_read_block_data(self, handle, reg):
+   async def i2c_read_block_data(self, handle, reg):
       """
       Reads a block of up to 32 bytes from the specified register of
       the device associated with handle.
@@ -2984,7 +3049,7 @@ class pi():
       the error code).
 
       ...
-      (b, d) = pi.i2c_read_block_data(h, 10)
+      (b, d) = await pi.i2c_read_block_data(h, 10)
       if b >= 0:
          # process data
       else:
@@ -2994,13 +3059,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_nolock(
+         bytes = u2i(await _pigpio_command_nolock(
             self.sl, _PI_CMD_I2CRK, handle, reg))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def i2c_block_process_call(self, handle, reg, data):
+   async def i2c_block_process_call(self, handle, reg, data):
       """
       Writes data bytes to the specified register of the device
       associated with handle and reads a device specified number
@@ -3026,13 +3091,13 @@ class pi():
       the error code).
 
       ...
-      (b, d) = pi.i2c_block_process_call(h, 10, b'\\x02\\x05\\x00')
+      (b, d) = await pi.i2c_block_process_call(h, 10, b'\\x02\\x05\\x00')
 
-      (b, d) = pi.i2c_block_process_call(h, 10, b'abcdr')
+      (b, d) = await pi.i2c_block_process_call(h, 10, b'abcdr')
 
-      (b, d) = pi.i2c_block_process_call(h, 10, "abracad")
+      (b, d) = await pi.i2c_block_process_call(h, 10, "abracad")
 
-      (b, d) = pi.i2c_block_process_call(h, 10, [2, 5, 16])
+      (b, d) = await pi.i2c_block_process_call(h, 10, [2, 5, 16])
       ...
       """
       # I p1 handle
@@ -3044,13 +3109,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CPK, handle, reg, len(data), [data]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def i2c_write_i2c_block_data(self, handle, reg, data):
+   async def i2c_write_i2c_block_data(self, handle, reg, data):
       """
       Writes data bytes to the specified register of the device
       associated with handle .  1-32 bytes may be written.
@@ -3064,13 +3129,13 @@ class pi():
       . .
 
       ...
-      pi.i2c_write_i2c_block_data(4, 5, 'hello')
+      await pi.i2c_write_i2c_block_data(4, 5, 'hello')
 
-      pi.i2c_write_i2c_block_data(4, 5, b'hello')
+      await pi.i2c_write_i2c_block_data(4, 5, b'hello')
 
-      pi.i2c_write_i2c_block_data(5, 0, b'\\x00\\x01\\x22')
+      await pi.i2c_write_i2c_block_data(5, 0, b'\\x00\\x01\\x22')
 
-      pi.i2c_write_i2c_block_data(6, 2, [0, 1, 0x22])
+      await pi.i2c_write_i2c_block_data(6, 2, [0, 1, 0x22])
       ...
       """
       # I p1 handle
@@ -3079,12 +3144,12 @@ class pi():
       ## extension ##
       # s len data bytes
       if len(data):
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_I2CWI, handle, reg, len(data), [data]))
       else:
          return 0
 
-   def i2c_read_i2c_block_data(self, handle, reg, count):
+   async def i2c_read_i2c_block_data(self, handle, reg, count):
       """
       Reads count bytes from the specified register of the device
       associated with handle .  The count may be 1-32.
@@ -3104,7 +3169,7 @@ class pi():
       the error code).
 
       ...
-      (b, d) = pi.i2c_read_i2c_block_data(h, 4, 32)
+      (b, d) = await pi.i2c_read_i2c_block_data(h, 4, 32)
       if b >= 0:
          # process data
       else:
@@ -3121,13 +3186,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CRI, handle, reg, 4, extents))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def i2c_read_device(self, handle, count):
+   async def i2c_read_device(self, handle, count):
       """
       Returns count bytes read from the raw device associated
       with handle.
@@ -3145,19 +3210,19 @@ class pi():
       the error code).
 
       ...
-      (count, data) = pi.i2c_read_device(h, 12)
+      (count, data) = await pi.i2c_read_device(h, 12)
       ...
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
          bytes = u2i(
-            _pigpio_command_nolock(self.sl, _PI_CMD_I2CRD, handle, count))
+            await _pigpio_command_nolock(self.sl, _PI_CMD_I2CRD, handle, count))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def i2c_write_device(self, handle, data):
+   async def i2c_write_device(self, handle, data):
       """
       Writes the data bytes to the raw device associated with handle.
 
@@ -3169,13 +3234,13 @@ class pi():
       . .
 
       ...
-      pi.i2c_write_device(h, b"\\x12\\x34\\xA8")
+      await pi.i2c_write_device(h, b"\\x12\\x34\\xA8")
 
-      pi.i2c_write_device(h, b"help")
+      await pi.i2c_write_device(h, b"help")
 
-      pi.i2c_write_device(h, 'help')
+      await pi.i2c_write_device(h, 'help')
 
-      pi.i2c_write_device(h, [23, 56, 231])
+      await pi.i2c_write_device(h, [23, 56, 231])
       ...
       """
       # I p1 handle
@@ -3184,13 +3249,13 @@ class pi():
       ## extension ##
       # s len data bytes
       if len(data):
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_I2CWD, handle, 0, len(data), [data]))
       else:
          return 0
 
 
-   def i2c_zip(self, handle, data):
+   async def i2c_zip(self, handle, data):
       """
       This function executes a sequence of I2C operations.  The
       operations to be performed are specified by the contents of data
@@ -3205,7 +3270,7 @@ class pi():
       the error code).
 
       ...
-      (count, data) = pi.i2c_zip(h, [4, 0x53, 7, 1, 0x32, 6, 6, 0])
+      (count, data) = await pi.i2c_zip(h, [4, 0x53, 7, 1, 0x32, 6, 6, 0])
       ...
 
       The following command codes are supported:
@@ -3252,14 +3317,14 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CZ, handle, 0, len(data), [data]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
 
-   def bb_spi_open(self, CS, MISO, MOSI, SCLK, baud=100000, spi_flags=0):
+   async def bb_spi_open(self, CS, MISO, MOSI, SCLK, baud=100000, spi_flags=0):
       """
       This function selects a set of GPIO for bit banging SPI at a
       specified baud rate.
@@ -3291,25 +3356,25 @@ class pi():
       The following constants may be used to set the mode:
 
       . .
-      pigpio.SPI_MODE_0
-      pigpio.SPI_MODE_1
-      pigpio.SPI_MODE_2
-      pigpio.SPI_MODE_3
+      copigpio.SPI_MODE_0
+      copigpio.SPI_MODE_1
+      copigpio.SPI_MODE_2
+      copigpio.SPI_MODE_3
       . .
 
-      Alternatively pigpio.SPI_CPOL and/or pigpio.SPI_CPHA
+      Alternatively copigpio.SPI_CPOL and/or copigpio.SPI_CPHA
       may be used.
 
       p is 0 if CS is active low (default) and 1 for active high.
-      pigpio.SPI_CS_HIGH_ACTIVE may be used to set this flag.
+      copigpio.SPI_CS_HIGH_ACTIVE may be used to set this flag.
 
       T is 1 if the least significant bit is transmitted on MOSI first,
       the default (0) shifts the most significant bit out first.
-      pigpio.SPI_TX_LSBFIRST may be used to set this flag.
+      copigpio.SPI_TX_LSBFIRST may be used to set this flag.
 
       R is 1 if the least significant bit is received on MISO first,
       the default (0) receives the most significant bit first.
-      pigpio.SPI_RX_LSBFIRST may be used to set this flag.
+      copigpio.SPI_RX_LSBFIRST may be used to set this flag.
 
       The other bits in spiFlags should be set to zero.
 
@@ -3335,11 +3400,11 @@ class pi():
       # I spi_flags
 
       extents = [struct.pack("IIIII", MISO, MOSI, SCLK, baud, spi_flags)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_BSPIO, CS, 0, 20, extents))
 
 
-   def bb_spi_close(self, CS):
+   async def bb_spi_close(self, CS):
       """
       This function stops bit banging SPI on a set of GPIO
       opened with [*bb_spi_open*].
@@ -3349,13 +3414,13 @@ class pi():
       Returns 0 if OK, otherwise PI_BAD_USER_GPIO, or PI_NOT_SPI_GPIO.
 
       ...
-      pi.bb_spi_close(CS)
+      await pi.bb_spi_close(CS)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BSPIC, CS, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BSPIC, CS, 0))
 
 
-   def bb_spi_xfer(self, CS, data):
+   async def bb_spi_xfer(self, CS, data):
       """
       This function executes a bit banged SPI transfer.
 
@@ -3369,8 +3434,8 @@ class pi():
 
       ...
       #!/usr/bin/env python
-
-      import pigpio
+      import asyncio
+      import copigpio
 
       CE0=5
       CE1=6
@@ -3378,37 +3443,42 @@ class pi():
       MOSI=19
       SCLK=12
 
-      pi = pigpio.pi()
-      if not pi.connected:
-         exit()
+      async def main(pi):
+         try:
+            await pi.connect()
+         except:
+            exit()
 
-      pi.bb_spi_open(CE0, MISO, MOSI, SCLK, 10000, 0) # MCP4251 DAC
-      pi.bb_spi_open(CE1, MISO, MOSI, SCLK, 20000, 3) # MCP3008 ADC
+         await pi.bb_spi_open(CE0, MISO, MOSI, SCLK, 10000, 0) # MCP4251 DAC
+         await pi.bb_spi_open(CE1, MISO, MOSI, SCLK, 20000, 3) # MCP3008 ADC
 
-      for i in range(256):
+         for i in range(256):
 
-         count, data = pi.bb_spi_xfer(CE0, [0, i]) # Set DAC value
-
-         if count == 2:
-
-            count, data = pi.bb_spi_xfer(CE0, [12, 0]) # Read back DAC
+            count, data = await pi.bb_spi_xfer(CE0, [0, i]) # Set DAC value
 
             if count == 2:
 
-               set_val = data[1]
+               count, data = await pi.bb_spi_xfer(CE0, [12, 0]) # Read back DAC
 
-               count, data = pi.bb_spi_xfer(CE1, [1, 128, 0]) # Read ADC
+               if count == 2:
 
-               if count == 3:
+                  set_val = data[1]
 
-                  read_val = ((data[1]&3)<<8) | data[2]
+                  count, data = await pi.bb_spi_xfer(CE1, [1, 128, 0]) # Read ADC
 
-                  print("{} {}".format(set_val, read_val))
+                  if count == 3:
 
-      pi.bb_spi_close(CE0)
-      pi.bb_spi_close(CE1)
+                     read_val = ((data[1]&3)<<8) | data[2]
 
-      pi.stop()
+                     print("{} {}".format(set_val, read_val))
+
+         await pi.bb_spi_close(CE0)
+         await pi.bb_spi_close(CE1)
+
+         await pi.stop()
+
+      pi = copigpio.pi()
+      asyncio.run_until_complete(main(pi))
       ...
       """
       # I p1 CS
@@ -3420,14 +3490,14 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BSPIX, CS, 0, len(data), [data]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
 
-   def bb_i2c_open(self, SDA, SCL, baud=100000):
+   async def bb_i2c_open(self, SDA, SCL, baud=100000):
       """
       This function selects a pair of GPIO for bit banging I2C at a
       specified baud rate.
@@ -3453,7 +3523,7 @@ class pi():
       As a guide the hardware pull-ups on pins 3 and 5 are 1k8 in value.
 
       ...
-      h = pi.bb_i2c_open(4, 5, 50000) # bit bang on GPIO 4/5 at 50kbps
+      h = await pi.bb_i2c_open(4, 5, 50000) # bit bang on GPIO 4/5 at 50kbps
       ...
       """
       # I p1 SDA
@@ -3462,11 +3532,11 @@ class pi():
       ## extension ##
       # I baud
       extents = [struct.pack("I", baud)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_BI2CO, SDA, SCL, 4, extents))
 
 
-   def bb_i2c_close(self, SDA):
+   async def bb_i2c_close(self, SDA):
       """
       This function stops bit banging I2C on a pair of GPIO
       previously opened with [*bb_i2c_open*].
@@ -3476,13 +3546,13 @@ class pi():
       Returns 0 if OK, otherwise PI_BAD_USER_GPIO, or PI_NOT_I2C_GPIO.
 
       ...
-      pi.bb_i2c_close(SDA)
+      await pi.bb_i2c_close(SDA)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_BI2CC, SDA, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_BI2CC, SDA, 0))
 
 
-   def bb_i2c_zip(self, SDA, data):
+   async def bb_i2c_zip(self, SDA, data):
       """
       This function executes a sequence of bit banged I2C operations.
       The operations to be performed are specified by the contents
@@ -3498,7 +3568,7 @@ class pi():
       the error code).
 
       ...
-      (count, data) = pi.bb_i2c_zip(
+      (count, data) = await pi.bb_i2c_zip(
                          SDA, [4, 0x53, 2, 7, 1, 0x32, 2, 6, 6, 3, 0])
       ...
 
@@ -3556,13 +3626,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BI2CZ, SDA, 0, len(data), [data]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def event_trigger(self, event):
+   async def event_trigger(self, event):
       """
       This function signals the occurrence of an event.
 
@@ -3584,13 +3654,13 @@ class pi():
       with an event.
 
       ...
-      pi.event_trigger(23)
+      await pi.event_trigger(23)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_EVT, event, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_EVT, event, 0))
 
 
-   def bsc_xfer(self, bsc_control, data):
+   async def bsc_xfer(self, bsc_control, data):
       """
       This function provides a low-level interface to the SPI/I2C Slave
       peripheral on the BCM chip.
@@ -3685,7 +3755,7 @@ class pi():
       TB    @ transmit busy
 
       ...
-      (status, count, data) = pi.bsc_xfer(0x330305, "Hello!")
+      (status, count, data) = await pi.bsc_xfer(0x330305, "Hello!")
       ...
 
       The BSC slave in SPI mode deserializes data from the MOSI pin into its
@@ -3742,10 +3812,10 @@ class pi():
       bytes = 0
       rdata = bytearray(b'')
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BSCX, bsc_control, 0, len(data), [data]))
          if bytes > 0:
-            rx = self._rxbuf(bytes)
+            rx = await self._rxbuf(bytes)
             status = struct.unpack('I', rx[0:4])[0]
             bytes -= 4
             rdata = rx[4:]
@@ -3754,7 +3824,7 @@ class pi():
             bytes = 0
       return status, bytes, rdata
 
-   def bsc_i2c(self, i2c_address, data=[]):
+   async def bsc_i2c(self, i2c_address, data=[]):
       """
       This function allows the Pi to act as a slave I2C device.
 
@@ -3780,22 +3850,23 @@ class pi():
 
       ...
       #!/usr/bin/env python
+      import asyncio
       import time
-      import pigpio
+      import copigpio
 
       I2C_ADDR=0x13
 
-      def i2c(id, tick):
+      async def i2c(id, tick):
           global pi
 
-          s, b, d = pi.bsc_i2c(I2C_ADDR)
+          s, b, d = await pi.bsc_i2c(I2C_ADDR)
           if b:
               if d[0] == ord('t'): # 116 send 'HH:MM:SS*'
 
                   print("sent={} FR={} received={} [{}]".
                      format(s>>16, s&0xfff,b,d))
 
-                  s, b, d = pi.bsc_i2c(I2C_ADDR,
+                  s, b, d = await pi.bsc_i2c(I2C_ADDR,
                      "{}*".format(time.asctime()[11:19]))
 
               elif d[0] == ord('d'): # 100 send 'Sun Oct 30*'
@@ -3803,27 +3874,31 @@ class pi():
                   print("sent={} FR={} received={} [{}]".
                      format(s>>16, s&0xfff,b,d))
 
-                  s, b, d = pi.bsc_i2c(I2C_ADDR,
+                  s, b, d = await pi.bsc_i2c(I2C_ADDR,
                      "{}*".format(time.asctime()[:10]))
 
-      pi = pigpio.pi()
+      async def main(pi):
+         try:
+            await pi.connect()
+         except:
+            exit()
 
-      if not pi.connected:
-          exit()
+         # Respond to BSC slave activity
 
-      # Respond to BSC slave activity
+         e = await pi.event_callback(copigpio.EVENT_BSC, i2c)
 
-      e = pi.event_callback(pigpio.EVENT_BSC, i2c)
+         await pi.bsc_i2c(I2C_ADDR) # Configure BSC as I2C slave
 
-      pi.bsc_i2c(I2C_ADDR) # Configure BSC as I2C slave
+         await asyncio.sleep(600)
 
-      time.sleep(600)
+         e.cancel()
 
-      e.cancel()
+         await pi.bsc_i2c(0) # Disable BSC peripheral
 
-      pi.bsc_i2c(0) # Disable BSC peripheral
+         await pi.stop()
 
-      pi.stop()
+      pi = copigpio.pi()
+      asyncio.run_until_complete(main(pi))
       ...
 
       While running the above.
@@ -3872,9 +3947,9 @@ class pi():
          control = (i2c_address<<16)|0x305
       else:
          control = 0
-      return self.bsc_xfer(control, data)
+      return await self.bsc_xfer(control, data)
 
-   def spi_open(self, spi_channel, baud, spi_flags=0):
+   async def spi_open(self, spi_channel, baud, spi_flags=0):
       """
       Returns a handle for the SPI device on the channel.  Data
       will be transferred at baud bits per second.  The flags
@@ -3965,7 +4040,7 @@ class pi():
       ...
       # open SPI device on channel 1 in mode 3 at 50000 bits per second
 
-      h = pi.spi_open(1, 50000, 3)
+      h = await pi.spi_open(1, 50000, 3)
       ...
       """
       # I p1 spi_channel
@@ -3974,22 +4049,22 @@ class pi():
       ## extension ##
       # I spi_flags
       extents = [struct.pack("I", spi_flags)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SPIO, spi_channel, baud, 4, extents))
 
-   def spi_close(self, handle):
+   async def spi_close(self, handle):
       """
       Closes the SPI device associated with handle.
 
       handle:= >=0 (as returned by a prior call to [*spi_open*]).
 
       ...
-      pi.spi_close(h)
+      await pi.spi_close(h)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SPIC, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SPIC, handle, 0))
 
-   def spi_read(self, handle, count):
+   async def spi_read(self, handle, count):
       """
       Reads count bytes from the SPI device associated with handle.
 
@@ -4002,7 +4077,7 @@ class pi():
       the error code).
 
       ...
-      (b, d) = pi.spi_read(h, 60) # read 60 bytes from device h
+      (b, d) = await pi.spi_read(h, 60) # read 60 bytes from device h
       if b == 60:
          # process read data
       else:
@@ -4012,13 +4087,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_nolock(
+         bytes = u2i(await _pigpio_command_nolock(
             self.sl, _PI_CMD_SPIR, handle, count))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def spi_write(self, handle, data):
+   async def spi_write(self, handle, data):
       """
       Writes the data bytes to the SPI device associated with handle.
 
@@ -4026,13 +4101,13 @@ class pi():
         data:= the bytes to write.
 
       ...
-      pi.spi_write(0, b'\\x02\\xc0\\x80') # write 3 bytes to device 0
+      await pi.spi_write(0, b'\\x02\\xc0\\x80') # write 3 bytes to device 0
 
-      pi.spi_write(0, b'defgh')        # write 5 bytes to device 0
+      await pi.spi_write(0, b'defgh')        # write 5 bytes to device 0
 
-      pi.spi_write(0, "def")           # write 3 bytes to device 0
+      await pi.spi_write(0, "def")           # write 3 bytes to device 0
 
-      pi.spi_write(1, [2, 192, 128])   # write 3 bytes to device 1
+      await pi.spi_write(1, [2, 192, 128])   # write 3 bytes to device 1
       ...
       """
       # I p1 handle
@@ -4040,10 +4115,10 @@ class pi():
       # I p3 len
       ## extension ##
       # s len data bytes
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SPIW, handle, 0, len(data), [data]))
 
-   def spi_xfer(self, handle, data):
+   async def spi_xfer(self, handle, data):
       """
       Writes the data bytes to the SPI device associated with handle,
       returning the data bytes read from the device.
@@ -4057,13 +4132,13 @@ class pi():
       the error code).
 
       ...
-      (count, rx_data) = pi.spi_xfer(h, b'\\x01\\x80\\x00')
+      (count, rx_data) = await pi.spi_xfer(h, b'\\x01\\x80\\x00')
 
-      (count, rx_data) = pi.spi_xfer(h, [1, 128, 0])
+      (count, rx_data) = await pi.spi_xfer(h, [1, 128, 0])
 
-      (count, rx_data) = pi.spi_xfer(h, b"hello")
+      (count, rx_data) = await pi.spi_xfer(h, b"hello")
 
-      (count, rx_data) = pi.spi_xfer(h, "hello")
+      (count, rx_data) = await pi.spi_xfer(h, "hello")
       ...
       """
       # I p1 handle
@@ -4075,13 +4150,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_SPIX, handle, 0, len(data), [data]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def serial_open(self, tty, baud, ser_flags=0):
+   async def serial_open(self, tty, baud, ser_flags=0):
       """
       Returns a handle for the serial tty device opened
       at baud bits per second.  The device name must start
@@ -4101,11 +4176,11 @@ class pi():
       38400, 57600, 115200, or 230400.
 
       ...
-      h1 = pi.serial_open("/dev/ttyAMA0", 300)
+      h1 = await pi.serial_open("/dev/ttyAMA0", 300)
 
-      h2 = pi.serial_open("/dev/ttyUSB1", 19200, 0)
+      h2 = await pi.serial_open("/dev/ttyUSB1", 19200, 0)
 
-      h3 = pi.serial_open("/dev/serial0", 9600)
+      h3 = await pi.serial_open("/dev/serial0", 9600)
       ...
       """
       # I p1 baud
@@ -4113,22 +4188,22 @@ class pi():
       # I p3 len
       ## extension ##
       # s len data bytes
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SERO, baud, ser_flags, len(tty), [tty]))
 
-   def serial_close(self, handle):
+   async def serial_close(self, handle):
       """
       Closes the serial device associated with handle.
 
       handle:= >=0 (as returned by a prior call to [*serial_open*]).
 
       ...
-      pi.serial_close(h1)
+      await pi.serial_close(h1)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SERC, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SERC, handle, 0))
 
-   def serial_read_byte(self, handle):
+   async def serial_read_byte(self, handle):
       """
       Returns a single byte from the device associated with handle.
 
@@ -4137,12 +4212,12 @@ class pi():
       If no data is ready a negative error code will be returned.
 
       ...
-      b = pi.serial_read_byte(h1)
+      b = await pi.serial_read_byte(h1)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SERRB, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SERRB, handle, 0))
 
-   def serial_write_byte(self, handle, byte_val):
+   async def serial_write_byte(self, handle, byte_val):
       """
       Writes a single byte to the device associated with handle.
 
@@ -4150,15 +4225,15 @@ class pi():
       byte_val:= 0-255, the value to write.
 
       ...
-      pi.serial_write_byte(h1, 23)
+      await pi.serial_write_byte(h1, 23)
 
-      pi.serial_write_byte(h1, ord('Z'))
+      await pi.serial_write_byte(h1, ord('Z'))
       ...
       """
       return _u2i(
-         _pigpio_command(self.sl, _PI_CMD_SERWB, handle, byte_val))
+         await _pigpio_command(self.sl, _PI_CMD_SERWB, handle, byte_val))
 
-   def serial_read(self, handle, count=1000):
+   async def serial_read(self, handle, count=1000):
       """
       Reads up to count bytes from the device associated with handle.
 
@@ -4172,7 +4247,7 @@ class pi():
 
       If no data is ready a bytes read of zero is returned.
       ...
-      (b, d) = pi.serial_read(h2, 100)
+      (b, d) = await pi.serial_read(h2, 100)
       if b > 0:
          # process read data
       ...
@@ -4181,12 +4256,12 @@ class pi():
       rdata = ""
       with self.sl.l:
          bytes = u2i(
-            _pigpio_command_nolock(self.sl, _PI_CMD_SERR, handle, count))
+            await _pigpio_command_nolock(self.sl, _PI_CMD_SERR, handle, count))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def serial_write(self, handle, data):
+   async def serial_write(self, handle, data):
       """
       Writes the data bytes to the device associated with handle.
 
@@ -4194,13 +4269,13 @@ class pi():
         data:= the bytes to write.
 
       ...
-      pi.serial_write(h1, b'\\x02\\x03\\x04')
+      await pi.serial_write(h1, b'\\x02\\x03\\x04')
 
-      pi.serial_write(h2, b'help')
+      await pi.serial_write(h2, b'help')
 
-      pi.serial_write(h2, "hello")
+      await pi.serial_write(h2, "hello")
 
-      pi.serial_write(h1, [2, 3, 4])
+      await pi.serial_write(h1, [2, 3, 4])
       ...
       """
       # I p1 handle
@@ -4209,10 +4284,10 @@ class pi():
       ## extension ##
       # s len data bytes
 
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SERW, handle, 0, len(data), [data]))
 
-   def serial_data_available(self, handle):
+   async def serial_data_available(self, handle):
       """
       Returns the number of bytes available to be read from the
       device associated with handle.
@@ -4220,15 +4295,15 @@ class pi():
       handle:= >=0 (as returned by a prior call to [*serial_open*]).
 
       ...
-      rdy = pi.serial_data_available(h1)
+      rdy = await pi.serial_data_available(h1)
 
       if rdy > 0:
-         (b, d) = pi.serial_read(h1, rdy)
+         (b, d) = await pi.serial_read(h1, rdy)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SERDA, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SERDA, handle, 0))
 
-   def gpio_trigger(self, user_gpio, pulse_len=10, level=1):
+   async def gpio_trigger(self, user_gpio, pulse_len=10, level=1):
       """
       Send a trigger pulse to a GPIO.  The GPIO is set to
       level for pulse_len microseconds and then reset to not level.
@@ -4238,7 +4313,7 @@ class pi():
           level:= 0-1
 
       ...
-      pi.gpio_trigger(23, 10, 1)
+      await pi.gpio_trigger(23, 10, 1)
       ...
       """
       # pigpio message format
@@ -4249,10 +4324,10 @@ class pi():
       ## extension ##
       # I level
       extents = [struct.pack("I", level)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_TRIG, user_gpio, pulse_len, 4, extents))
 
-   def set_glitch_filter(self, user_gpio, steady):
+   async def set_glitch_filter(self, user_gpio, steady):
       """
       Sets a glitch filter on a GPIO.
 
@@ -4276,12 +4351,12 @@ class pi():
       microseconds after it was first detected.
 
       ...
-      pi.set_glitch_filter(23, 100)
+      await pi.set_glitch_filter(23, 100)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_FG, user_gpio, steady))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_FG, user_gpio, steady))
 
-   def set_noise_filter(self, user_gpio, steady, active):
+   async def set_noise_filter(self, user_gpio, steady, active):
       """
       Sets a noise filter on a GPIO.
 
@@ -4307,7 +4382,7 @@ class pi():
       such reports.
 
       ...
-      pi.set_noise_filter(23, 1000, 5000)
+      await pi.set_noise_filter(23, 1000, 5000)
       ...
       """
       # pigpio message format
@@ -4318,10 +4393,10 @@ class pi():
       ## extension ##
       # I active
       extents = [struct.pack("I", active)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_FN, user_gpio, steady, 4, extents))
 
-   def store_script(self, script):
+   async def store_script(self, script):
       """
       Store a script for later execution.
 
@@ -4333,7 +4408,7 @@ class pi():
       Returns a >=0 script id if OK.
 
       ...
-      sid = pi.store_script(
+      sid = await pi.store_script(
          b'tag 0 w 22 1 mils 100 w 22 0 mils 100 dcr p0 jp 0')
       ...
       """
@@ -4343,12 +4418,12 @@ class pi():
       ## extension ##
       # s len data bytes
       if len(script):
-         return _u2i(_pigpio_command_ext(
+         return _u2i(await _pigpio_command_ext(
             self.sl, _PI_CMD_PROC, 0, 0, len(script), [script]))
       else:
          return 0
 
-   def run_script(self, script_id, params=None):
+   async def run_script(self, script_id, params=None):
       """
       Runs a stored script.
 
@@ -4356,11 +4431,11 @@ class pi():
          params:= up to 10 parameters required by the script.
 
       ...
-      s = pi.run_script(sid, [par1, par2])
+      s = await pi.run_script(sid, [par1, par2])
 
-      s = pi.run_script(sid)
+      s = await pi.run_script(sid)
 
-      s = pi.run_script(sid, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+      s = await pi.run_script(sid, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
       ...
       """
       # I p1 script id
@@ -4377,10 +4452,10 @@ class pi():
       else:
          nump = 0
          extents = []
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_PROCR, script_id, 0, nump*4, extents))
 
-   def update_script(self, script_id, params=None):
+   async def update_script(self, script_id, params=None):
       """
       Sets the parameters of a script.  The script may or
       may not be running.  The first parameters of the script are
@@ -4390,9 +4465,9 @@ class pi():
          params:= up to 10 parameters required by the script.
 
       ...
-      s = pi.update_script(sid, [par1, par2])
+      s = await pi.update_script(sid, [par1, par2])
 
-      s = pi.update_script(sid, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+      s = await pi.update_script(sid, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
       ...
       """
       # I p1 script id
@@ -4409,10 +4484,10 @@ class pi():
       else:
          nump = 0
          extents = []
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_PROCU, script_id, 0, nump*4, extents))
 
-   def script_status(self, script_id):
+   async def script_status(self, script_id):
       """
       Returns the run status of a stored script as well as the
       current values of parameters 0 to 9.
@@ -4434,16 +4509,16 @@ class pi():
       and the parameter list will be empty.
 
       ...
-      (s, pars) = pi.script_status(sid)
+      (s, pars) = await pi.script_status(sid)
       ...
       """
       status = PI_CMD_INTERRUPTED
       params = ()
       with self.sl.l:
          bytes = u2i(
-            _pigpio_command_nolock(self.sl, _PI_CMD_PROCP, script_id, 0))
+            await _pigpio_command_nolock(self.sl, _PI_CMD_PROCP, script_id, 0))
          if bytes > 0:
-            data = self._rxbuf(bytes)
+            data = await self._rxbuf(bytes)
             pars = struct.unpack('11i', _str(data))
             status = pars[0]
             params = pars[1:]
@@ -4451,31 +4526,31 @@ class pi():
             status = bytes
       return status, params
 
-   def stop_script(self, script_id):
+   async def stop_script(self, script_id):
       """
       Stops a running script.
 
       script_id:= id of stored script.
 
       ...
-      status = pi.stop_script(sid)
+      status = await pi.stop_script(sid)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PROCS, script_id, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PROCS, script_id, 0))
 
-   def delete_script(self, script_id):
+   async def delete_script(self, script_id):
       """
       Deletes a stored script.
 
       script_id:= id of stored script.
 
       ...
-      status = pi.delete_script(sid)
+      status = await pi.delete_script(sid)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PROCD, script_id, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PROCD, script_id, 0))
 
-   def bb_serial_read_open(self, user_gpio, baud, bb_bits=8):
+   async def bb_serial_read_open(self, user_gpio, baud, bb_bits=8):
       """
       Opens a GPIO for bit bang reading of serial data.
 
@@ -4490,8 +4565,8 @@ class pi():
       buffer in a timely fashion.
 
       ...
-      status = pi.bb_serial_read_open(4, 19200)
-      status = pi.bb_serial_read_open(17, 9600)
+      status = await pi.bb_serial_read_open(4, 19200)
+      status = await pi.bb_serial_read_open(17, 9600)
       ...
       """
       # pigpio message format
@@ -4502,10 +4577,10 @@ class pi():
       ## extension ##
       # I bb_bits
       extents = [struct.pack("I", bb_bits)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SLRO, user_gpio, baud, 4, extents))
 
-   def bb_serial_read(self, user_gpio):
+   async def bb_serial_read(self, user_gpio):
       """
       Returns data from the bit bang serial cyclic buffer.
 
@@ -4525,32 +4600,31 @@ class pi():
       For [*bb_bits*] 17-32 there will be four bytes per character.
 
       ...
-      (count, data) = pi.bb_serial_read(4)
+      (count, data) = await pi.bb_serial_read(4)
       ...
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
           bytes = u2i(
-             _pigpio_command_nolock(self.sl, _PI_CMD_SLR, user_gpio, 10000))
+             await _pigpio_command_nolock(self.sl, _PI_CMD_SLR, user_gpio, 10000))
           if bytes > 0:
-             rdata = self._rxbuf(bytes)
+             rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-
-   def bb_serial_read_close(self, user_gpio):
+   async def bb_serial_read_close(self, user_gpio):
       """
       Closes a GPIO for bit bang reading of serial data.
 
       user_gpio:= 0-31 (opened in a prior call to [*bb_serial_read_open*])
 
       ...
-      status = pi.bb_serial_read_close(17)
+      status = await pi.bb_serial_read_close(17)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SLRC, user_gpio, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SLRC, user_gpio, 0))
 
-   def bb_serial_invert(self, user_gpio, invert):
+   async def bb_serial_invert(self, user_gpio, invert):
       """
       Invert serial logic.
 
@@ -4558,13 +4632,13 @@ class pi():
           invert:= 0-1 (1 invert, 0 normal)
 
       ...
-      status = pi.bb_serial_invert(17, 1)
+      status = await pi.bb_serial_invert(17, 1)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_SLRI, user_gpio, invert))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_SLRI, user_gpio, invert))
 
 
-   def custom_1(self, arg1=0, arg2=0, argx=[]):
+   async def custom_1(self, arg1=0, arg2=0, argx=[]):
       """
       Calls a pigpio function customised by the user.
 
@@ -4576,17 +4650,17 @@ class pi():
       should be >=0 for OK and <0 for error.
 
       ...
-      value = pi.custom_1()
+      value = await pi.custom_1()
 
-      value = pi.custom_1(23)
+      value = await pi.custom_1(23)
 
-      value = pi.custom_1(0, 55)
+      value = await pi.custom_1(0, 55)
 
-      value = pi.custom_1(23, 56, [1, 5, 7])
+      value = await pi.custom_1(23, 56, [1, 5, 7])
 
-      value = pi.custom_1(23, 56, b"hello")
+      value = await pi.custom_1(23, 56, b"hello")
 
-      value = pi.custom_1(23, 56, "hello")
+      value = await pi.custom_1(23, 56, "hello")
       ...
       """
       # I p1 arg1
@@ -4595,10 +4669,10 @@ class pi():
       ## extension ##
       # s len argx bytes
 
-      return u2i(_pigpio_command_ext(
+      return u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_CF1, arg1, arg2, len(argx), [argx]))
 
-   def custom_2(self, arg1=0, argx=[], retMax=8192):
+   async def custom_2(self, arg1=0, argx=[], retMax=8192):
       """
       Calls a pigpio function customised by the user.
 
@@ -4612,15 +4686,15 @@ class pi():
       less than zero (and will contain the error code).
 
       ...
-      (count, data) = pi.custom_2()
+      (count, data) = await pi.custom_2()
 
-      (count, data) = pi.custom_2(23)
+      (count, data) = await pi.custom_2(23)
 
-      (count, data) = pi.custom_2(23, [1, 5, 7])
+      (count, data) = await pi.custom_2(23, [1, 5, 7])
 
-      (count, data) = pi.custom_2(23, b"hello")
+      (count, data) = await pi.custom_2(23, b"hello")
 
-      (count, data) = pi.custom_2(23, "hello", 128)
+      (count, data) = await pi.custom_2(23, "hello", 128)
       ...
       """
       # I p1 arg1
@@ -4632,13 +4706,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_CF2, arg1, retMax, len(argx), [argx]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def get_pad_strength(self, pad):
+   async def get_pad_strength(self, pad):
       """
       This function returns the pad drive strength in mA.
 
@@ -4652,12 +4726,12 @@ class pi():
       2   @ 46-53
 
       ...
-      strength = pi.get_pad_strength(0) # Get pad 0 strength.
+      strength = await pi.get_pad_strength(0) # Get pad 0 strength.
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PADG, pad, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PADG, pad, 0))
 
-   def set_pad_strength(self, pad, pad_strength):
+   async def set_pad_strength(self, pad, pad_strength):
       """
       This function sets the pad drive strength in mA.
 
@@ -4673,13 +4747,13 @@ class pi():
       2   @ 46-53
 
       ...
-      pi.set_pad_strength(2, 14) # Set pad 2 to 14 mA.
+      await pi.set_pad_strength(2, 14) # Set pad 2 to 14 mA.
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_PADS, pad, pad_strength))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_PADS, pad, pad_strength))
 
 
-   def file_open(self, file_name, file_mode):
+   async def file_open(self, file_name, file_mode):
       """
       This function returns a handle to a file opened in a specified mode.
 
@@ -4691,12 +4765,12 @@ class pi():
       PI_FILE_OPEN_FAILED, or PI_FILE_IS_A_DIR.
 
       ...
-      h = pi.file_open("/home/pi/shared/dir_3/file.txt",
-              pigpio.FILE_WRITE | pigpio.FILE_CREATE)
+      h = await pi.file_open("/home/pi/shared/dir_3/file.txt",
+              copigpio.FILE_WRITE | copigpio.FILE_CREATE)
 
-      pi.file_write(h, "Hello world")
+      await pi.file_write(h, "Hello world")
 
-      pi.file_close(h)
+      await pi.file_close(h)
       ...
 
       File
@@ -4763,31 +4837,35 @@ class pi():
 
       ...
       #!/usr/bin/env python
+      import asyncio
+      import copigpio
 
-      import pigpio
+      async def main(pi):
+         try:
+            await pi.connect()
+         except:
+            exit()
 
-      pi = pigpio.pi()
+         # Assumes /opt/pigpio/access contains the following line:
+         # /ram/*.c r
 
-      if not pi.connected:
-         exit()
+         handle = await pi.file_open("/ram/pigpio.c", copigpio.FILE_READ)
 
-      # Assumes /opt/pigpio/access contains the following line:
-      # /ram/*.c r
+         done = False
 
-      handle = pi.file_open("/ram/pigpio.c", pigpio.FILE_READ)
+         while not done:
+            c, d = await pi.file_read(handle, 60000)
+            if c > 0:
+               print(d)
+            else:
+               done = True
 
-      done = False
+         await pi.file_close(handle)
 
-      while not done:
-         c, d = pi.file_read(handle, 60000)
-         if c > 0:
-            print(d)
-         else:
-            done = True
+         await pi.stop()
 
-      pi.file_close(handle)
-
-      pi.stop()
+      pi = copigpio.pi()
+      asyncio.run_until_complete(main(pi))
       ...
       """
       # I p1 file_mode
@@ -4795,22 +4873,22 @@ class pi():
       # I p3 len
       ## extension ##
       # s len data bytes
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_FO, file_mode, 0, len(file_name), [file_name]))
 
-   def file_close(self, handle):
+   async def file_close(self, handle):
       """
       Closes the file associated with handle.
 
       handle:= >=0 (as returned by a prior call to [*file_open*]).
 
       ...
-      pi.file_close(handle)
+      await pi.file_close(handle)
       ...
       """
-      return _u2i(_pigpio_command(self.sl, _PI_CMD_FC, handle, 0))
+      return _u2i(await _pigpio_command(self.sl, _PI_CMD_FC, handle, 0))
 
-   def file_read(self, handle, count):
+   async def file_read(self, handle, count):
       """
       Reads up to count bytes from the file associated with handle.
 
@@ -4823,7 +4901,7 @@ class pi():
       the error code).
 
       ...
-      (b, d) = pi.file_read(h2, 100)
+      (b, d) = await pi.file_read(h2, 100)
       if b > 0:
          # process read data
       ...
@@ -4832,12 +4910,12 @@ class pi():
       rdata = ""
       with self.sl.l:
          bytes = u2i(
-            _pigpio_command_nolock(self.sl, _PI_CMD_FR, handle, count))
+            await _pigpio_command_nolock(self.sl, _PI_CMD_FR, handle, count))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def file_write(self, handle, data):
+   async def file_write(self, handle, data):
       """
       Writes the data bytes to the file associated with handle.
 
@@ -4845,13 +4923,13 @@ class pi():
         data:= the bytes to write.
 
       ...
-      pi.file_write(h1, b'\\x02\\x03\\x04')
+      await pi.file_write(h1, b'\\x02\\x03\\x04')
 
-      pi.file_write(h2, b'help')
+      await pi.file_write(h2, b'help')
 
-      pi.file_write(h2, "hello")
+      await pi.file_write(h2, "hello")
 
-      pi.file_write(h1, [2, 3, 4])
+      await pi.file_write(h1, [2, 3, 4])
       ...
       """
       # I p1 handle
@@ -4860,10 +4938,10 @@ class pi():
       ## extension ##
       # s len data bytes
 
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_FW, handle, 0, len(data), [data]))
 
-   def file_seek(self, handle, seek_offset, seek_from):
+   async def file_seek(self, handle, seek_offset, seek_from):
       """
       Seeks to a position relative to the start, current position,
       or end of the file.  Returns the new position.
@@ -4873,11 +4951,11 @@ class pi():
         seek_from:= FROM_START, FROM_CURRENT, or FROM_END.
 
       ...
-      new_pos = pi.file_seek(h, 100, pigpio.FROM_START)
+      new_pos = await pi.file_seek(h, 100, copigpio.FROM_START)
 
-      cur_pos = pi.file_seek(h, 0, pigpio.FROM_CURRENT)
+      cur_pos = await pi.file_seek(h, 0, copigpio.FROM_CURRENT)
 
-      file_size = pi.file_seek(h, 0, pigpio.FROM_END)
+      file_size = await pi.file_seek(h, 0, copigpio.FROM_END)
       ...
       """
       # I p1 handle
@@ -4886,10 +4964,10 @@ class pi():
       ## extension ##
       # I seek_from
       extents = [struct.pack("I", seek_from)]
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_FS, handle, seek_offset, 4, extents))
 
-   def file_list(self, fpattern):
+   async def file_list(self, fpattern):
       """
       Returns a list of files which match a pattern.
 
@@ -4909,22 +4987,26 @@ class pi():
 
       ...
       #!/usr/bin/env python
+      import asyncio
+      import copigpio
 
-      import pigpio
+      async def main(pi):
+         try:
+            await pi.connect()
+         except:
+            exit()
 
-      pi = pigpio.pi()
+         # Assumes /opt/pigpio/access contains the following line:
+         # /ram/*.c r
 
-      if not pi.connected:
-         exit()
+         c, d = await pi.file_list("/ram/p*.c")
+         if c > 0:
+            print(d)
 
-      # Assumes /opt/pigpio/access contains the following line:
-      # /ram/*.c r
+         await pi.stop()
 
-      c, d = pi.file_list("/ram/p*.c")
-      if c > 0:
-         print(d)
-
-      pi.stop()
+      pi = copigpio.pi()
+      asyncio.run_until_complete(main(pi))
       ...
       """
       # I p1 60000
@@ -4936,13 +5018,13 @@ class pi():
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
       with self.sl.l:
-         bytes = u2i(_pigpio_command_ext_nolock(
+         bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_FL, 60000, 0, len(fpattern), [fpattern]))
          if bytes > 0:
-            rdata = self._rxbuf(bytes)
+            rdata = await self._rxbuf(bytes)
       return bytes, rdata
 
-   def shell(self, shellscr, pstring=""):
+   async def shell(self, shellscr, pstring=""):
       """
       This function uses the system call to execute a shell script
       with the given string as its parameter.
@@ -4971,13 +5053,13 @@ class pi():
 
       ...
       // pass two parameters, hello and world
-      status = pi.shell("scr1", "hello world");
+      status = await pi.shell("scr1", "hello world");
 
       // pass three parameters, hello, string with spaces, and world
-      status = pi.shell("scr1", "hello 'string with spaces' world");
+      status = await pi.shell("scr1", "hello 'string with spaces' world");
 
       // pass one parameter, hello string with spaces world
-      status = pi.shell("scr1", "\\"hello string with spaces world\\"");
+      status = await pi.shell("scr1", "\\"hello string with spaces world\\"");
       ...
       """
       # I p1 len(shellscr)
@@ -4988,11 +5070,11 @@ class pi():
 
       ls = len(shellscr)
       lp = len(pstring)
-      return _u2i(_pigpio_command_ext(
+      return _u2i(await _pigpio_command_ext(
          self.sl, _PI_CMD_SHELL, ls, 0, ls+lp+1, [shellscr+'\x00'+pstring]))
 
 
-   def callback(self, user_gpio, edge=RISING_EDGE, func=None):
+   async def callback(self, user_gpio, edge=RISING_EDGE, func=None):
       """
       Calls a user supplied function (a callback) whenever the
       specified GPIO edge is detected.
@@ -5063,22 +5145,24 @@ class pi():
       def cbf(gpio, level, tick):
          print(gpio, level, tick)
 
-      cb1 = pi.callback(22, pigpio.EITHER_EDGE, cbf)
+      cb1 = await pi.callback(22, copigpio.EITHER_EDGE, cbf)
 
-      cb2 = pi.callback(4, pigpio.EITHER_EDGE)
+      cb2 = await pi.callback(4, copigpio.EITHER_EDGE)
 
-      cb3 = pi.callback(17)
+      cb3 = await pi.callback(17)
 
       print(cb3.tally())
 
       cb3.reset_tally()
 
-      cb1.cancel() # To cancel callback cb1.
+      await cb1.cancel() # To cancel callback cb1.
       ...
       """
-      return _callback(self._notify, user_gpio, edge, func)
+      cb = _callback(self._notify, user_gpio, edge, func)
+      await self._notify.append(cb.callb)
+      return cb
 
-   def event_callback(self, event, func=None):
+   async def event_callback(self, event, func=None):
       """
       Calls a user supplied function (a callback) whenever the
       specified event is signalled.
@@ -5094,7 +5178,7 @@ class pi():
       by calling the tally function.  The count may be reset to zero
       by calling the reset_tally function.
 
-      The callback may be canceled by calling the cancel function.
+      The callback may be cancelled by calling the cancel function.
 
       An event may have multiple callbacks (although I can't think of
       a reason to do so).
@@ -5103,21 +5187,23 @@ class pi():
       def cbf(event, tick):
          print(event, tick)
 
-      cb1 = pi.event_callback(22, cbf)
+      cb1 = await pi.event_callback(22, cbf)
 
-      cb2 = pi.event_callback(4)
+      cb2 = await pi.event_callback(4)
 
       print(cb2.tally())
 
       cb2.reset_tally()
 
-      cb1.cancel() # To cancel callback cb1.
+      await cb1.cancel() # To cancel callback cb1.
       ...
       """
 
-      return _event(self._notify, event, func)
+      ecb = _event(self._notify, event, func)
+      await self._notify.append_event(ecb.callb)
+      return ecb
 
-   def wait_for_edge(self, user_gpio, edge=RISING_EDGE, wait_timeout=60.0):
+   async def wait_for_edge(self, user_gpio, edge=RISING_EDGE, wait_timeout=60.0):
       """
       Wait for an edge event on a GPIO.
 
@@ -5126,61 +5212,77 @@ class pi():
                      FALLING_EDGE.
       wait_timeout:= >=0.0 (default 60.0).
 
-      The function returns when the edge is detected or after
-      the number of seconds specified by timeout has expired.
+      The function returns when the edge is detected, else
+      raises an asyncio.TimeoutError after the number of seconds
+      specified by timeout has elapsed.
 
-      Do not use this function for precise timing purposes,
-      the edge is only checked 20 times a second. Whenever
-      you need to know the accurate time of GPIO events use
-      a [*callback*] function.
-
-      The function returns True if the edge is detected,
-      otherwise False.
+      Do not use this function for precise timing purposes.
+      Whenever you need to know the accurate time of GPIO events
+      use a [*callback*] function.
 
       ...
-      if pi.wait_for_edge(23):
+      try:
+         await pi.wait_for_edge(23)
          print("Rising edge detected")
-      else:
+      except asyncio.TimeoutError:
          print("wait for edge timed out")
 
-      if pi.wait_for_edge(23, pigpio.FALLING_EDGE, 5.0):
+      try:
+         await pi.wait_for_edge(23, copigpio.FALLING_EDGE, 5.0)
          print("Falling edge detected")
-      else:
+      except asyncio.TimeoutError:
          print("wait for falling edge timed out")
       ...
       """
-      a = _wait_for_edge(self._notify, user_gpio, edge, wait_timeout)
-      return a.trigger
+      ew = _wait_for_edge(self._notify, user_gpio, edge)
+      await ew.wait_for(wait_timeout)
 
-   def wait_for_event(self, event, wait_timeout=60.0):
+   async def wait_for_event(self, event, wait_timeout=60.0):
       """
       Wait for an event.
 
              event:= 0-31.
       wait_timeout:= >=0.0 (default 60.0).
 
-      The function returns when the event is signalled or after
-      the number of seconds specified by timeout has expired.
+      The function returns when the event is signalled, else
+      raises an asyncio.TimoutError after the number of seconds
+      specified by timeout has elapsed.
 
-      The function returns True if the event is detected,
-      otherwise False.
+      Do not use this function for precise timing purposes.
+      Whenever you need to know the accurate time of GPIO events
+      use a [*callback*] function.
 
       ...
-      if pi.wait_for_event(23):
+      try:
+         await pi.wait_for_event(23)
          print("event detected")
-      else:
+      except asyncio.TimeoutError:
          print("wait for event timed out")
       ...
       """
-      a = _wait_for_event(self._notify, event, wait_timeout)
-      return a.trigger
+      ew = _wait_for_event(self._notify, event)
+      await ew.wait_for(wait_timeout)
 
    def __init__(self,
-                host = os.getenv("PIGPIO_ADDR", 'localhost'),
-                port = os.getenv("PIGPIO_PORT", 8888),
-                show_errors = True):
+                loop = None):
       """
-      Grants access to a Pi's GPIO.
+      An API for accessing a Pi's GPIO.
+
+      loop:= the asyncio event loop on which to run. By default,
+             run on the default asyncio event loop.
+      """
+      if loop is None:
+         loop = asyncio.get_event_loop()
+
+      self.sl = _socklock()
+      self._notify  = None
+      self._loop = loop
+
+   async def connect(self,
+                     host = os.getenv("PIGPIO_ADDR", 'localhost'),
+                     port = os.getenv("PIGPIO_PORT", 8888)):
+      """
+      Connect to a pigpio daemon at (host, port).
 
       host:= the host name of the Pi on which the pigpio daemon is
              running.  The default is localhost unless overridden by
@@ -5194,91 +5296,68 @@ class pi():
       This connects to the pigpio daemon and reserves resources
       to be used for sending commands and receiving notifications.
 
-      An instance attribute [*connected*] may be used to check the
-      success of the connection.  If the connection is established
-      successfully [*connected*] will be True, otherwise False.
+      A copigpio.error is raised if the connection cannot be
+      established.
 
       ...
-      pi = pigio.pi()              # use defaults
-      pi = pigpio.pi('mypi')       # specify host, default port
-      pi = pigpio.pi('mypi', 7777) # specify host and port
+      pi = copigio.pi()
+      await pi.connect()               # use defaults
+      pi = copigpio.pi()
+      await pi.connect('mypi')         # specify host, default port
+      pi = copigpio.pi()
+      await pi.connect('mypi', 7777)   # specify host and port
 
-      pi = pigpio.pi()             # exit script if no connection
-      if not pi.connected:
-         exit()
-      ...
+
+      pi = copigpio.pi()
+      try:
+         await pi.connect()
+      except copigpio.error:
+         exit()                        # exit script if no connection
       """
-      self.connected = True
-
-      self.sl = _socklock()
-      self._notify  = None
-
       port = int(port)
-
       if host == '':
          host = "localhost"
 
-      self._host = host
-      self._port = port
-
       try:
-         self.sl.s = socket.create_connection((host, port), None)
-
+         sock = socket.create_connection((host, port), None)
          # Disable the Nagle algorithm.
-         self.sl.s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-         self._notify = _callback_thread(self.sl, host, port)
-
-      except socket.error:
-         exception = 1
-
-      except struct.error:
-         exception = 2
-
-      except error:
-         # assumed to be no handle available
-         exception = 3
-
-      else:
-         exception = 0
-         atexit.register(self.stop)
-
-      if exception != 0:
-
-         self.connected = False
-
-         if self.sl.s is not None:
-            self.sl.s = None
-
-         if show_errors:
-
-            s = "Can't connect to pigpio at {}({})".format(host, str(port))
-
-
-            print(_except_a.format(s))
-            if exception == 1:
-                print(_except_1)
-            elif exception == 2:
-                print(_except_2)
-            else:
-                print(_except_3)
+         self.sl.s = _cosocket(loop, sock)
+         self._notify = _callback_handler(self.sl, loop=loop)
+         await self._notify.listen()
+      except:
+         s = "Can't connect to pigpio at {}({})".format(host, str(port))
+         print(_except_a.format(s))
+         try:
+            raise
+         except socket.error as e:
+            raise error(_except_1) from e
+         except struct.error as e:
+            raise error(_except_2) from e
+         except error as e:
+            # Raised from _u2i on getting a negative value (an error) for the
+            # notification handle.
+            # assume no handle available
+            raise error(_except_3) from e
+         finally:
             print(_except_z)
+            self.stop()
+      else:
+         atexit.register(self.stop)
 
    def __repr__(self):
       return "<pipio.pi host={} port={}>".format(self._host, self._port)
 
-   def stop(self):
-      """Release pigpio resources.
+   async def stop(self):
+      """Release pigpio daemon resources.
 
       ...
-      pi.stop()
+      await pi.stop()
       ...
       """
-
-      self.connected = False
-
       if self._notify is not None:
-         self._notify.stop()
+         await self._notify.stop()
          self._notify = None
 
       if self.sl.s is not None:
@@ -5346,9 +5425,6 @@ def xref():
 
    clkfreq: 4689-250M (13184-375M for the BCM2711)
    The hardware clock frequency.
-
-   connected:
-   True if a connection was established, False otherwise.
 
    count:
    The number of bytes of data to be transferred.
@@ -5751,10 +5827,8 @@ def xref():
    The name of a shell script.  The script must exist
    in /opt/pigpio/cgi and must be executable.
 
-   show_errors:
-   Controls the display of pigpio daemon connection failures.
-   The default of True prints the probable failure reasons to
-   standard output.
+   spi_*:
+   One of the spi_ functions.
 
    spi_channel: 0-2
    A SPI channel.
