@@ -300,7 +300,8 @@ import threading
 import os
 import atexit
 
-VERSION = "1.41"
+__version__ = '0.0.1' # copigpio version.
+VERSION = "1.41" # Upstream pigpio version.
 
 exceptions = True
 
