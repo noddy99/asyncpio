@@ -2664,7 +2664,8 @@ class pi():
          await pi.stop()
 
       pi = copigpio.pi()
-      asyncio.run_until_complete(main(pi))
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
       """
       # I p1 0
@@ -3479,7 +3480,8 @@ class pi():
          await pi.stop()
 
       pi = copigpio.pi()
-      asyncio.run_until_complete(main(pi))
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
       """
       # I p1 CS
@@ -3899,7 +3901,8 @@ class pi():
          await pi.stop()
 
       pi = copigpio.pi()
-      asyncio.run_until_complete(main(pi))
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
 
       While running the above.
@@ -4866,7 +4869,8 @@ class pi():
          await pi.stop()
 
       pi = copigpio.pi()
-      asyncio.run_until_complete(main(pi))
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
       """
       # I p1 file_mode
@@ -5007,7 +5011,8 @@ class pi():
          await pi.stop()
 
       pi = copigpio.pi()
-      asyncio.run_until_complete(main(pi))
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
       """
       # I p1 60000
