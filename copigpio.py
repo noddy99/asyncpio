@@ -931,7 +931,7 @@ class _socklock:
    """
    def __init__(self, loop=None):
       self.s = None
-      self.l = asyncio.Lock(loop)
+      self.l = asyncio.Lock(loop=loop)
 
 class error(Exception):
    """pigpio module exception"""
@@ -1180,10 +1180,10 @@ class _callback_handler:
    async def listen(self, host, port):
       """Connect and listen for notifications."""
       sock = socket.create_connection((host, port), None)
-      self.sl.s = _cosocket(self._loop, socket)
+      self.sl.s = _cosocket(self._loop, sock)
       self.lastLevel = await _pigpio_command(self.sl,  _PI_CMD_BR1, 0, 0)
-      self.handle = await _u2i(_pigpio_command(self.sl, _PI_CMD_NOIB, 0, 0))
-      self._notify_task = self._loop.create_task(self._notify)
+      self.handle = _u2i(await _pigpio_command(self.sl, _PI_CMD_NOIB, 0, 0))
+      self._notify_task = self._loop.create_task(self._notify())
 
    async def stop(self):
       """Stop notifications."""
@@ -5264,8 +5264,7 @@ class pi():
       ew = _wait_for_event(self._notify, event)
       await ew.wait_for(wait_timeout)
 
-   def __init__(self,
-                loop = None):
+   def __init__(self, loop=None):
       """
       An API for accessing a Pi's GPIO.
 
@@ -5324,9 +5323,9 @@ class pi():
          # Disable the Nagle algorithm.
          sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-         self.sl.s = _cosocket(loop, sock)
-         self._notify = _callback_handler(self.sl, loop=loop)
-         await self._notify.listen()
+         self.sl.s = _cosocket(self._loop, sock)
+         self._notify = _callback_handler(self.sl, loop=self._loop)
+         await self._notify.listen(host, port)
       except:
          s = "Can't connect to pigpio at {}({})".format(host, str(port))
          try:
