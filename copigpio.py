@@ -330,7 +330,6 @@ import sys
 import socket
 import struct
 import asyncio
-import inspect
 import os
 import atexit
 
@@ -1117,16 +1116,13 @@ async def _pigpio_command_ext_nolock(sl, cmd, p1, p2, p3, extents):
    dummy, res = struct.unpack('12sI', raw_res)
    return res
 
-def _ensure_awaitable(func):
-   async def call(*args, **kwargs):
-      # If func is a normal function, r is its result.
-      # If func is a coroutine, or returns an awaitable object,
-      # r is an awaitable.
-      r = func(*args, **kwargs)
-      if inspect.isawaitable(r):
-         r = await r
-      return r
-   return call
+def _ensure_coroutine(func):
+   if asyncio.iscoroutinefunction(func):
+      return func
+
+   async def _call(*args, **kwargs):
+      return func(*args, **kwargs)
+   return _call
 
 class _event_ADT:
    """
@@ -1141,7 +1137,7 @@ class _event_ADT:
        func:= a user function taking one argument, the event id.
       """
       self.event = event
-      self.func = _ensure_awaitable(func)
+      self.func = _ensure_coroutine(func)
       self.bit = 1<<event
 
 class _callback_ADT:
@@ -1157,7 +1153,7 @@ class _callback_ADT:
       """
       self.gpio = gpio
       self.edge = edge
-      self.func = _ensure_awaitable(func)
+      self.func = _ensure_coroutine(func)
       self.bit = 1<<gpio
 
 class _callback_handler:
@@ -1277,18 +1273,18 @@ class _callback_handler:
                      if cb.bit & level:
                         newLevel = 1
                      if (cb.edge ^ newLevel):
-                         await cb.func(cb.gpio, newLevel, tick)
+                         self._loop.create_task(cb.func(cb.gpio, newLevel, tick))
             else:
                if flags & NTFY_FLAGS_WDOG:
                   gpio = flags & NTFY_FLAGS_GPIO
                   for cb in self.callbacks:
                      if cb.gpio == gpio:
-                        await cb.func(gpio, TIMEOUT, tick)
+                        self._loop.create_task(cb.func(gpio, TIMEOUT, tick))
                elif flags & NTFY_FLAGS_EVENT:
                   event = flags & NTFY_FLAGS_GPIO
                   for cb in self.events:
                      if cb.event == event:
-                        await cb.func(event, tick)
+                        self._loop.create_task(cb.func(event, tick))
          buf = buf[offset:]
 
       self.sl.s.close()
