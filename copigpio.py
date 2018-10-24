@@ -1044,7 +1044,7 @@ async def _pigpio_command(sl, cmd, p1, p2):
     p2:= command parameter 2 (if applicable).
    """
    res = PI_CMD_INTERRUPTED
-   with sl.l:
+   async with sl.l:
       await sl.s.send(struct.pack('IIII', cmd, p1, p2, 0))
       raw_res = await sl.s.recv(_SOCK_CMD_LEN)
    dummy, res = struct.unpack('12sI', raw_res)
@@ -1083,7 +1083,7 @@ async def _pigpio_command_ext(sl, cmd, p1, p2, p3, extents):
       else:
          ext.extend(x)
    res = PI_CMD_INTERRUPTED
-   with sl.l:
+   async with sl.l:
       await sl.s.sendall(ext)
       raw_res = await sl.s.recv(_SOCK_CMD_LEN)
    dummy, res = struct.unpack('12sI', raw_res)
@@ -3058,7 +3058,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_nolock(
             self.sl, _PI_CMD_I2CRK, handle, reg))
          if bytes > 0:
@@ -3108,7 +3108,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CPK, handle, reg, len(data), [data]))
          if bytes > 0:
@@ -3185,7 +3185,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CRI, handle, reg, 4, extents))
          if bytes > 0:
@@ -3215,7 +3215,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(
             await _pigpio_command_nolock(self.sl, _PI_CMD_I2CRD, handle, count))
          if bytes > 0:
@@ -3316,7 +3316,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_I2CZ, handle, 0, len(data), [data]))
          if bytes > 0:
@@ -3489,7 +3489,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BSPIX, CS, 0, len(data), [data]))
          if bytes > 0:
@@ -3625,7 +3625,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BI2CZ, SDA, 0, len(data), [data]))
          if bytes > 0:
@@ -3811,7 +3811,7 @@ class pi():
       status = PI_CMD_INTERRUPTED
       bytes = 0
       rdata = bytearray(b'')
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_BSCX, bsc_control, 0, len(data), [data]))
          if bytes > 0:
@@ -4086,7 +4086,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_nolock(
             self.sl, _PI_CMD_SPIR, handle, count))
          if bytes > 0:
@@ -4149,7 +4149,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_SPIX, handle, 0, len(data), [data]))
          if bytes > 0:
@@ -4254,7 +4254,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(
             await _pigpio_command_nolock(self.sl, _PI_CMD_SERR, handle, count))
          if bytes > 0:
@@ -4514,7 +4514,7 @@ class pi():
       """
       status = PI_CMD_INTERRUPTED
       params = ()
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(
             await _pigpio_command_nolock(self.sl, _PI_CMD_PROCP, script_id, 0))
          if bytes > 0:
@@ -4605,7 +4605,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
           bytes = u2i(
              await _pigpio_command_nolock(self.sl, _PI_CMD_SLR, user_gpio, 10000))
           if bytes > 0:
@@ -4705,7 +4705,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_CF2, arg1, retMax, len(argx), [argx]))
          if bytes > 0:
@@ -4908,7 +4908,7 @@ class pi():
       """
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(
             await _pigpio_command_nolock(self.sl, _PI_CMD_FR, handle, count))
          if bytes > 0:
@@ -5017,7 +5017,7 @@ class pi():
 
       bytes = PI_CMD_INTERRUPTED
       rdata = ""
-      with self.sl.l:
+      async with self.sl.l:
          bytes = u2i(await _pigpio_command_ext_nolock(
             self.sl, _PI_CMD_FL, 60000, 0, len(fpattern), [fpattern]))
          if bytes > 0:
