@@ -882,6 +882,8 @@ _except_a = "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n{}"
 _except_z = "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
 
 _except_1 = """
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+{}
 Did you start the pigpio daemon? E.g. sudo pigpiod
 
 Did you specify the correct Pi host/port in the environment
@@ -889,15 +891,21 @@ variables PIGPIO_ADDR/PIGPIO_PORT?
 E.g. export PIGPIO_ADDR=soft, export PIGPIO_PORT=8888
 
 Did you specify the correct Pi host/port in the
-copigpio.pi.connect() function? E.g. await pi.connect('soft', 8888)"""
+copigpio.pi.connect() function? E.g. await pi.connect('soft', 8888)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"""
 
 _except_2 = """
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+{}
 Do you have permission to access the pigpio daemon?
-Perhaps it was started with sudo pigpiod -nlocalhost"""
+Perhaps it was started with sudo pigpiod -nlocalhost
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"""
 
 _except_3 = """
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Can't create callback handler.
-Perhaps too many simultaneous pigpio connections."""
+Perhaps too many simultaneous pigpio connections.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"""
 
 class _cosocket:
    """An asynchronous socket."""
@@ -928,10 +936,7 @@ class _socklock:
 
 class error(Exception):
    """pigpio module exception"""
-   def __init__(self, value):
-      self.value = value
-   def __str__(self):
-      return repr(self.value)
+   pass
 
 class pulse:
    """
@@ -5328,23 +5333,19 @@ class pi():
          await self._notify.listen()
       except:
          s = "Can't connect to pigpio at {}({})".format(host, str(port))
-         print(_except_a.format(s))
          try:
             raise
          except socket.error as e:
-            raise error(_except_1) from e
+            raise error(_except_1.format(s)) from e
          except struct.error as e:
-            raise error(_except_2) from e
+            raise error(_except_2.format(s)) from e
          except error as e:
             # Raised from _u2i on getting a negative value (an error) for the
             # notification handle.
-            # assume no handle available
+            # Assume no handle available.
             raise error(_except_3) from e
          finally:
-            print(_except_z)
-            self.stop()
-      else:
-         atexit.register(self.stop)
+            await self.stop()
 
    def __repr__(self):
       return "<pipio.pi host={} port={}>".format(self._host, self._port)
