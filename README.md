@@ -1,6 +1,6 @@
-# copigpio
+# asyncpio
 
-copigpio is an asynchronous Python client for [pigpio](https://github.com/joan2937/pigpio),
+asyncpio is an asynchronous Python client for [pigpio](https://github.com/joan2937/pigpio),
 which allows control of the Raspberry Pi's General Purpose Input Outputs (GPIO).
 
 This is a port of pigpio's thread-based Python client to asyncio.
@@ -15,7 +15,7 @@ See http://abyz.me.uk/rpi/pigpio/
 
 ## GPIO
 
-ALL GPIO are identified by their Broadcom number.  See http://elinux.org.
+ALL GPIO are identified by their Broadcom number.  See https://pinout.xyz.
 
 There are 54 GPIO in total, arranged in two banks.
 

@@ -15,7 +15,7 @@ import sys
 import time
 import struct
 
-import copigpio
+import asyncpio
 
 GPIO=25
 
@@ -294,7 +294,7 @@ def t4():
                l = 0
             else:
                l = (1<<GPIO)
-           
+
             s += 1
             n += 1
 

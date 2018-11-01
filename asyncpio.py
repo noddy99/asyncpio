@@ -1,5 +1,5 @@
 """
-pigpio is a Python module for the Raspberry which talks to
+asyncpio is a Python module for the Raspberry which talks to
 the pigpio daemon to allow control of the general purpose
 input outputs (GPIO).
 
@@ -53,17 +53,17 @@ By default a fatal exception is raised if you pass an invalid
 argument to a pigpio function.
 
 If you wish to handle the returned status yourself you should set
-copigpio.exceptions to False.
+asyncpio.exceptions to False.
 
 You may prefer to check the returned status in only a few parts
 of your code.  In that case do the following:
 
 ...
-copigpio.exceptions = False
+asyncpio.exceptions = False
 
 # Code where you want to test the error status.
 
-copigpio.exceptions = True
+asyncpio.exceptions = True
 ...
 
 *Usage*
@@ -77,15 +77,15 @@ start).
 sudo pigpiod
 
 Your Python program must import pigpio and create one or more
-instances of the copigpio.pi class.  This class gives access to
+instances of the asyncpio.pi class.  This class gives access to
 a specified Pi's GPIO.
 
 ...
-pi1 = copigpio.pi()
+pi1 = asyncpio.pi()
 await pi1.connect()       # pi1 accesses the local Pi's GPIO
-pi2 = copigpio.pi()
+pi2 = asyncpio.pi()
 await pi2.connect('tom')  # pi2 accesses tom's GPIO
-pi3 = copigpio.pi()
+pi3 = asyncpio.pi()
 await pi3.connect('dick') # pi3 accesses dick's GPIO
 
 await pi1.write(4, 0) # set local Pi's GPIO 4 low
@@ -94,13 +94,13 @@ await pi3.read(4)     # get level of dick's GPIO 4
 ...
 
 The later example code snippets assume that pi is an instance of
-the copigpio.pi class.
+the asyncpio.pi class.
 
 OVERVIEW
 
 ESSENTIAL
 
-copigpio.pi               Initialise Pi connection
+asyncpio.pi               Initialise Pi connection
 stop                      Stop a Pi connection
 
 BASIC
@@ -322,8 +322,8 @@ get_current_tick          Get current tick (microseconds)
 get_hardware_revision     Get hardware revision
 get_pigpio_version        Get the pigpio version
 
-copigpio.error_text       Gets error text from error number
-copigpio.tickDiff         Returns difference between two ticks
+asyncpio.error_text       Gets error text from error number
+asyncpio.tickDiff         Returns difference between two ticks
 """
 
 import sys
@@ -333,7 +333,7 @@ import asyncio
 import os
 import atexit
 
-__version__ = '0.0.1' # copigpio version.
+__version__ = '0.0.1' # asyncpio version.
 VERSION = "1.78"  # Upstream pigpio version. sync minor number to pigpio library version
 
 exceptions = True
@@ -890,7 +890,7 @@ variables PIGPIO_ADDR/PIGPIO_PORT?
 E.g. export PIGPIO_ADDR=soft, export PIGPIO_PORT=8888
 
 Did you specify the correct Pi host/port in the
-copigpio.pi.connect() function? E.g. await pi.connect('soft', 8888)
+asyncpio.pi.connect() function? E.g. await pi.connect('soft', 8888)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"""
 
 _except_2 = """
@@ -962,7 +962,7 @@ def error_text(errnum):
    errnum:= <0, the error number
 
    ...
-   print(copigpio.error_text(-5))
+   print(asyncpio.error_text(-5))
    level not 0-1
    ...
    """
@@ -979,7 +979,7 @@ def tickDiff(t1, t2):
    t2:= the later tick
 
    ...
-   print(copigpio.tickDiff(4294967272, 12))
+   print(asyncpio.tickDiff(4294967272, 12))
    36
    ...
    """
@@ -1432,9 +1432,9 @@ class pi():
       mode:= INPUT, OUTPUT, ALT0, ALT1, ALT2, ALT3, ALT4, ALT5.
 
       ...
-      await pi.set_mode( 4, copigpio.INPUT)  # GPIO  4 as input
-      await pi.set_mode(17, copigpio.OUTPUT) # GPIO 17 as output
-      await pi.set_mode(24, copigpio.ALT2)   # GPIO 24 as ALT2
+      await pi.set_mode( 4, asyncpio.INPUT)  # GPIO  4 as input
+      await pi.set_mode(17, asyncpio.OUTPUT) # GPIO 17 as output
+      await pi.set_mode(24, asyncpio.ALT2)   # GPIO 24 as ALT2
       ...
       """
       return _u2i(await _pigpio_command(self.sl, _PI_CMD_MODES, gpio, mode))
@@ -1473,9 +1473,9 @@ class pi():
        pud:= PUD_UP, PUD_DOWN, PUD_OFF.
 
       ...
-      await pi.set_pull_up_down(17, copigpio.PUD_OFF)
-      await pi.set_pull_up_down(23, copigpio.PUD_UP)
-      await pi.set_pull_up_down(24, copigpio.PUD_DOWN)
+      await pi.set_pull_up_down(17, asyncpio.PUD_OFF)
+      await pi.set_pull_up_down(23, asyncpio.PUD_UP)
+      await pi.set_pull_up_down(24, asyncpio.PUD_DOWN)
       ...
       """
       return _u2i(await _pigpio_command(self.sl, _PI_CMD_PUD, gpio, pud))
@@ -1487,13 +1487,13 @@ class pi():
       gpio:= 0-53.
 
       ...
-      await pi.set_mode(23, copigpio.INPUT)
+      await pi.set_mode(23, asyncpio.INPUT)
 
-      await pi.set_pull_up_down(23, copigpio.PUD_DOWN)
+      await pi.set_pull_up_down(23, asyncpio.PUD_DOWN)
       print(await pi.read(23))
       0
 
-      await pi.set_pull_up_down(23, copigpio.PUD_UP)
+      await pi.set_pull_up_down(23, asyncpio.PUD_UP)
       print(await pi.read(23))
       1
       ...
@@ -1511,7 +1511,7 @@ class pi():
       switched off.
 
       ...
-      await pi.set_mode(17, copigpio.OUTPUT)
+      await pi.set_mode(17, asyncpio.OUTPUT)
 
       await pi.write(17,0)
       print(await pi.read(17))
@@ -2210,19 +2210,19 @@ class pi():
       G1=4
       G2=24
 
-      await pi.set_mode(G1, copigpio.OUTPUT)
-      await pi.set_mode(G2, copigpio.OUTPUT)
+      await pi.set_mode(G1, asyncpio.OUTPUT)
+      await pi.set_mode(G2, asyncpio.OUTPUT)
 
       flash_500=[] # flash every 500 ms
       flash_100=[] # flash every 100 ms
 
       #                              ON     OFF  DELAY
 
-      flash_500.append(copigpio.pulse(1<<G1, 1<<G2, 500000))
-      flash_500.append(copigpio.pulse(1<<G2, 1<<G1, 500000))
+      flash_500.append(asyncpio.pulse(1<<G1, 1<<G2, 500000))
+      flash_500.append(asyncpio.pulse(1<<G2, 1<<G1, 500000))
 
-      flash_100.append(copigpio.pulse(1<<G1, 1<<G2, 100000))
-      flash_100.append(copigpio.pulse(1<<G2, 1<<G1, 100000))
+      flash_100.append(asyncpio.pulse(1<<G1, 1<<G2, 100000))
+      flash_100.append(asyncpio.pulse(1<<G2, 1<<G1, 100000))
 
       await pi.wave_clear() # clear any existing waveforms
 
@@ -2619,7 +2619,7 @@ class pi():
       #!/usr/bin/env python
 
       import asyncio
-      import copigpio
+      import asyncpio
 
       WAVES=5
       GPIO=4
@@ -2628,12 +2628,12 @@ class pi():
 
       async def main(pi):
          await pi.connect() # Connect to local Pi.
-         await pi.set_mode(GPIO, copigpio.OUTPUT);
+         await pi.set_mode(GPIO, asyncpio.OUTPUT);
 
          for i in range(WAVES):
             await pi.wave_add_generic([
-               copigpio.pulse(1<<GPIO, 0, 20),
-               copigpio.pulse(0, 1<<GPIO, (i+1)*200)]);
+               asyncpio.pulse(1<<GPIO, 0, 20),
+               asyncpio.pulse(0, 1<<GPIO, (i+1)*200)]);
 
             wid[i] = await pi.wave_create();
 
@@ -2663,7 +2663,7 @@ class pi():
 
          await pi.stop()
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       loop = asyncio.get_event_loop()
       loop.run_until_complete(main(pi))
       ...
@@ -3358,25 +3358,25 @@ class pi():
       The following constants may be used to set the mode:
 
       . .
-      copigpio.SPI_MODE_0
-      copigpio.SPI_MODE_1
-      copigpio.SPI_MODE_2
-      copigpio.SPI_MODE_3
+      asyncpio.SPI_MODE_0
+      asyncpio.SPI_MODE_1
+      asyncpio.SPI_MODE_2
+      asyncpio.SPI_MODE_3
       . .
 
-      Alternatively copigpio.SPI_CPOL and/or copigpio.SPI_CPHA
+      Alternatively asyncpio.SPI_CPOL and/or asyncpio.SPI_CPHA
       may be used.
 
       p is 0 if CS is active low (default) and 1 for active high.
-      copigpio.SPI_CS_HIGH_ACTIVE may be used to set this flag.
+      asyncpio.SPI_CS_HIGH_ACTIVE may be used to set this flag.
 
       T is 1 if the least significant bit is transmitted on MOSI first,
       the default (0) shifts the most significant bit out first.
-      copigpio.SPI_TX_LSBFIRST may be used to set this flag.
+      asyncpio.SPI_TX_LSBFIRST may be used to set this flag.
 
       R is 1 if the least significant bit is received on MISO first,
       the default (0) receives the most significant bit first.
-      copigpio.SPI_RX_LSBFIRST may be used to set this flag.
+      asyncpio.SPI_RX_LSBFIRST may be used to set this flag.
 
       The other bits in spiFlags should be set to zero.
 
@@ -3437,7 +3437,7 @@ class pi():
       ...
       #!/usr/bin/env python
       import asyncio
-      import copigpio
+      import asyncpio
 
       CE0=5
       CE1=6
@@ -3479,7 +3479,7 @@ class pi():
 
          await pi.stop()
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       loop = asyncio.get_event_loop()
       loop.run_until_complete(main(pi))
       ...
@@ -3855,7 +3855,7 @@ class pi():
       #!/usr/bin/env python
       import asyncio
       import time
-      import copigpio
+      import asyncpio
 
       I2C_ADDR=0x13
 
@@ -3888,7 +3888,7 @@ class pi():
 
          # Respond to BSC slave activity
 
-         e = await pi.event_callback(copigpio.EVENT_BSC, i2c)
+         e = await pi.event_callback(asyncpio.EVENT_BSC, i2c)
 
          await pi.bsc_i2c(I2C_ADDR) # Configure BSC as I2C slave
 
@@ -3900,7 +3900,7 @@ class pi():
 
          await pi.stop()
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       loop = asyncio.get_event_loop()
       loop.run_until_complete(main(pi))
       ...
@@ -4770,7 +4770,7 @@ class pi():
 
       ...
       h = await pi.file_open("/home/pi/shared/dir_3/file.txt",
-              copigpio.FILE_WRITE | copigpio.FILE_CREATE)
+              asyncpio.FILE_WRITE | asyncpio.FILE_CREATE)
 
       await pi.file_write(h, "Hello world")
 
@@ -4842,7 +4842,7 @@ class pi():
       ...
       #!/usr/bin/env python
       import asyncio
-      import copigpio
+      import asyncpio
 
       async def main(pi):
          try:
@@ -4853,7 +4853,7 @@ class pi():
          # Assumes /opt/pigpio/access contains the following line:
          # /ram/*.c r
 
-         handle = await pi.file_open("/ram/pigpio.c", copigpio.FILE_READ)
+         handle = await pi.file_open("/ram/pigpio.c", asyncpio.FILE_READ)
 
          done = False
 
@@ -4868,7 +4868,7 @@ class pi():
 
          await pi.stop()
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       loop = asyncio.get_event_loop()
       loop.run_until_complete(main(pi))
       ...
@@ -4956,11 +4956,11 @@ class pi():
         seek_from:= FROM_START, FROM_CURRENT, or FROM_END.
 
       ...
-      new_pos = await pi.file_seek(h, 100, copigpio.FROM_START)
+      new_pos = await pi.file_seek(h, 100, asyncpio.FROM_START)
 
-      cur_pos = await pi.file_seek(h, 0, copigpio.FROM_CURRENT)
+      cur_pos = await pi.file_seek(h, 0, asyncpio.FROM_CURRENT)
 
-      file_size = await pi.file_seek(h, 0, copigpio.FROM_END)
+      file_size = await pi.file_seek(h, 0, asyncpio.FROM_END)
       ...
       """
       # I p1 handle
@@ -4993,7 +4993,7 @@ class pi():
       ...
       #!/usr/bin/env python
       import asyncio
-      import copigpio
+      import asyncpio
 
       async def main(pi):
          try:
@@ -5010,7 +5010,7 @@ class pi():
 
          await pi.stop()
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       loop = asyncio.get_event_loop()
       loop.run_until_complete(main(pi))
       ...
@@ -5151,9 +5151,9 @@ class pi():
       def cbf(gpio, level, tick):
          print(gpio, level, tick)
 
-      cb1 = await pi.callback(22, copigpio.EITHER_EDGE, cbf)
+      cb1 = await pi.callback(22, asyncpio.EITHER_EDGE, cbf)
 
-      cb2 = await pi.callback(4, copigpio.EITHER_EDGE)
+      cb2 = await pi.callback(4, asyncpio.EITHER_EDGE)
 
       cb3 = await pi.callback(17)
 
@@ -5234,7 +5234,7 @@ class pi():
          print("wait for edge timed out")
 
       try:
-         await pi.wait_for_edge(23, copigpio.FALLING_EDGE, 5.0)
+         await pi.wait_for_edge(23, asyncpio.FALLING_EDGE, 5.0)
          print("Falling edge detected")
       except asyncio.TimeoutError:
          print("wait for falling edge timed out")
@@ -5301,22 +5301,22 @@ class pi():
       This connects to the pigpio daemon and reserves resources
       to be used for sending commands and receiving notifications.
 
-      A copigpio.error is raised if the connection cannot be
+      A asyncpio.error is raised if the connection cannot be
       established.
 
       ...
-      pi = copigio.pi()
+      pi = asyncpio.pi()
       await pi.connect()               # use defaults
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       await pi.connect('mypi')         # specify host, default port
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       await pi.connect('mypi', 7777)   # specify host and port
 
 
-      pi = copigpio.pi()
+      pi = asyncpio.pi()
       try:
          await pi.connect()
-      except copigpio.error:
+      except asyncpio.error:
          exit()                        # exit script if no connection
       """
       port = int(port)
