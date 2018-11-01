@@ -26,17 +26,17 @@ def find_version(*file_paths):
 
 long_description = read('README.md')
 
-setup(name='copigpio',
-      version=find_version('copigpio.py'),
+setup(name='asyncpio',
+      version=find_version('asyncpio.py'),
       author='Sam Thomson',
       maintainer='Sam Thomson',
-      url='https://github.com/spthm/copigpio',
+      url='https://github.com/spthm/asyncpio',
       description='Python module for asynchronous access to the pigpio daemon',
       long_description=long_description,
       long_description_content_type='text/markdown',
-      download_url='https://github.com/spthm/copigpio/archive/master.zip',
+      download_url='https://github.com/spthm/asyncpio/archive/master.zip',
       license='unlicense.org',
-      py_modules=['copigpio'],
+      py_modules=['asyncpio'],
       keywords=['raspberrypi', 'gpio',],
       classifiers=[
          "Programming Language :: Python :: 3",
