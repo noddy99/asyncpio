@@ -1273,19 +1273,20 @@ class _callback_handler:
                      if cb.bit & level:
                         newLevel = 1
                      if (cb.edge ^ newLevel):
-                         self._loop.create_task(cb.func(cb.gpio, newLevel, tick))
+                         await cb.func(cb.gpio, newLevel, tick)
             else:
                if flags & NTFY_FLAGS_WDOG:
                   gpio = flags & NTFY_FLAGS_GPIO
                   for cb in self.callbacks:
                      if cb.gpio == gpio:
-                        self._loop.create_task(cb.func(gpio, TIMEOUT, tick))
+                        await cb.func(gpio, TIMEOUT, tick)
                elif flags & NTFY_FLAGS_EVENT:
                   event = flags & NTFY_FLAGS_GPIO
                   for cb in self.events:
                      if cb.event == event:
-                        self._loop.create_task(cb.func(event, tick))
+                        await cb.func(event, tick)
          buf = buf[offset:]
+         await asyncio.sleep(0.0)
 
       self.sl.s.close()
 
