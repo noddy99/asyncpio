@@ -1668,7 +1668,7 @@ class pi():
       will be that set by [*hardware_PWM*].
 
       ...
-      await pi.set_PWM_frequency(4,0)
+      await pi.set_PWM_frequency(4, 0)
       print(await pi.get_PWM_frequency(4))
       10
 
@@ -4973,8 +4973,7 @@ class pi():
 
       The callback may be cancelled by calling the cancel function.
 
-      A GPIO may have multiple callbacks (although I can't think of
-      a reason to do so).
+      A GPIO may have multiple callbacks.
 
       ...
       def cbf(gpio, level, tick):
