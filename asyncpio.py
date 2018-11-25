@@ -5319,20 +5319,19 @@ class pi():
       except asyncpio.error:
          exit()                        # exit script if no connection
       """
-      port = int(port)
-      if host == '':
-         host = "localhost"
+      self._port = int(port)
+      self._host = host
 
       try:
-         sock = socket.create_connection((host, port), None)
+         sock = socket.create_connection((self._host, self._port), None)
          # Disable the Nagle algorithm.
          sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
          self.sl.s = _cosocket(self._loop, sock)
          self._notify = _callback_handler(self.sl, loop=self._loop)
-         await self._notify.listen(host, port)
+         await self._notify.listen(self._host, self._port)
       except:
-         s = "Can't connect to pigpio at {}({})".format(host, str(port))
+         s = "Can't connect to pigpio at {}({})".format(self._host, str(self._port))
          try:
             raise
          except socket.error as e:
