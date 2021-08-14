@@ -13,7 +13,6 @@
 
 import asyncio
 import sys
-import time
 import struct
 
 import asyncpio
