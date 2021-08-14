@@ -2657,7 +2657,7 @@ class pi():
             ])
 
          while await pi.wave_tx_busy():
-            asyncio.sleep(0.1);
+            await asyncio.sleep(0.1);
 
          for i in range(WAVES):
             await pi.wave_delete(wid[i])
