@@ -2,7 +2,7 @@
 
 import time
 
-import pigpio
+import asyncpio
 
 class ranger:
    """
@@ -34,11 +34,11 @@ class ranger:
       self._trig_mode = pi.get_mode(self._trig)
       self._echo_mode = pi.get_mode(self._echo)
 
-      pi.set_mode(self._trig, pigpio.OUTPUT)
-      pi.set_mode(self._echo, pigpio.INPUT)
+      pi.set_mode(self._trig, asyncpio.OUTPUT)
+      pi.set_mode(self._echo, asyncpio.INPUT)
 
-      self._cb = pi.callback(self._trig, pigpio.EITHER_EDGE, self._cbf)
-      self._cb = pi.callback(self._echo, pigpio.EITHER_EDGE, self._cbf)
+      self._cb = pi.callback(self._trig, asyncpio.EITHER_EDGE, self._cbf)
+      self._cb = pi.callback(self._echo, asyncpio.EITHER_EDGE, self._cbf)
 
       self._inited = True
 
@@ -91,11 +91,11 @@ if __name__ == "__main__":
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import sonar_trigger_echo
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    sonar = sonar_trigger_echo.ranger(pi, 23, 18)
 

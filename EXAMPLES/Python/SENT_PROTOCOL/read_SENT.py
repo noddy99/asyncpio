@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
 # read_PWM.py
-# Public Domain by mark smith,   www.surfncircuits.com 
+# Public Domain by mark smith,   www.surfncircuits.com
 # blog:https://surfncircuits.com/2020/11/27/implementing-a-single-edge-nibble-transmission-sent-protocol-in-python-for-the-raspberry-pi-zero/
 
 import time
-import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
+import asyncpio # http://abyz.co.uk/rpi/pigpio/python.html
 import threading
 
 class SENTReader:
@@ -73,9 +73,9 @@ class SENTReader:
         self.numberFrames = 0
         self.SampleStopped = False
 
-        self.pi.set_mode(gpio, pigpio.INPUT)
+        self.pi.set_mode(gpio, asyncpio.INPUT)
 
-        #self._cb = pi.callback(gpio, pigpio.EITHER_EDGE, self._cbf)
+        #self._cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cbf)
         #sleep enougth to start reading SENT
         #time.sleep(0.05)
 
@@ -96,7 +96,7 @@ class SENTReader:
      while True:
 
         self.SampleStopped = False
-        self._cb = self.pi.callback(self.gpio, pigpio.EITHER_EDGE, self._cbf)
+        self._cb = self.pi.callback(self.gpio, asyncpio.EITHER_EDGE, self._cbf)
         # wait until sample stopped
         while self.SampleStopped == False:
             #do nothing
@@ -114,13 +114,13 @@ class SENTReader:
         if self.syncFound == False:
             if level == 1:
                 self._high_tick = tick
-                self._low = pigpio.tickDiff(self._low_tick,tick)
+                self._low = asyncpio.tickDiff(self._low_tick,tick)
             elif level == 0:
                 # this may be a syncpulse if the duty is 51/56
-                self._period = pigpio.tickDiff(self._low_tick,tick)
+                self._period = asyncpio.tickDiff(self._low_tick,tick)
                 # not reset the self._low_tick
                 self._low_tick = tick
-                self._high = pigpio.tickDiff(self._high_tick,tick)
+                self._high = asyncpio.tickDiff(self._high_tick,tick)
                 # sync pulse is detected by finding duty ratio. 51/56
                 # but also filter if period is > 90us*56 = 5040
                 if (100*self._high/self._period) > 87 and (self._period<5100):
@@ -136,13 +136,13 @@ class SENTReader:
             # now look for the nibble information for each nibble (8 Nibbles)
             if level == 1:
                 self._high_tick = tick
-                self._low = pigpio.tickDiff(self._low_tick,tick)
+                self._low = asyncpio.tickDiff(self._low_tick,tick)
             elif level == 0:
                 # This will be a data nibble
-                self._period = pigpio.tickDiff(self._low_tick,tick)
+                self._period = asyncpio.tickDiff(self._low_tick,tick)
                 # not reset the self._low_tick
                 self._low_tick = tick
-                self._high = pigpio.tickDiff(self._high_tick,tick)
+                self._high = asyncpio.tickDiff(self._high_tick,tick)
                 self.nibble = self.nibble + 1
                 if self.nibble == 1:
                     self.status = self._period
@@ -184,7 +184,7 @@ class SENTReader:
         # check that data1 = Data2 if they are not equal return fault = True
         # will check the CRC code for faults.  if fault, return = true
         # returns status, data1, data2, crc, fault
-        #self._cb = self.pi.callback(self.gpio, pigpio.EITHER_EDGE, self._cbf)
+        #self._cb = self.pi.callback(self.gpio, asyncpio.EITHER_EDGE, self._cbf)
         #time.sleep(0.1)
         fault = False
         SentFrame = self.frame[:]
@@ -295,14 +295,14 @@ class SENTReader:
 if __name__ == "__main__":
 
     import time
-    import pigpio
+    import asyncpio
     import read_SENT
 
     SENT_GPIO = 18
     RUN_TIME = 6000000000.0
     SAMPLE_TIME = 0.1
 
-    pi = pigpio.pi()
+    pi = asyncpio.pi()
 
     p = read_SENT.SENTReader(pi, SENT_GPIO)
 

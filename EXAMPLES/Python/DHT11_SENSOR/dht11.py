@@ -4,7 +4,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
-import pigpio
+import asyncio
+
+import asyncpio
 
 
 class DHT11(object):
@@ -14,7 +16,7 @@ class DHT11(object):
     - https://github.com/srounet/pigpio/tree/master/EXAMPLES/Python/DHT22_AM2302_SENSOR
 
     example code:
-    >>> pi = pigpio.pi()
+    >>> pi = asyncpio.pi()
     >>> sensor = DHT11(pi, 4) # 4 is the data GPIO pin connected to your sensor
     >>> for response in sensor:
     ....    print("Temperature: {}".format(response['temperature']))
@@ -40,7 +42,7 @@ class DHT11(object):
         Clears the internal gpio pull-up/down resistor.
         Kills any watchdogs.
         """
-        self.pi.set_pull_up_down(self.gpio, pigpio.PUD_OFF)
+        self.pi.set_pull_up_down(self.gpio, asyncpio.PUD_OFF)
         self.pi.set_watchdog(self.gpio, 0)
         self.register_callbacks()
 
@@ -50,7 +52,7 @@ class DHT11(object):
         """
         self.either_edge_cb = self.pi.callback(
             self.gpio,
-            pigpio.EITHER_EDGE,
+            asyncpio.EITHER_EDGE,
             self.either_edge_callback
         )
 
@@ -60,12 +62,12 @@ class DHT11(object):
         Accumulate the 40 data bits from the dht11 sensor.
         """
         level_handlers = {
-            pigpio.FALLING_EDGE: self._edge_FALL,
-            pigpio.RISING_EDGE: self._edge_RISE,
-            pigpio.EITHER_EDGE: self._edge_EITHER
+            asyncpio.FALLING_EDGE: self._edge_FALL,
+            asyncpio.RISING_EDGE: self._edge_RISE,
+            asyncpio.EITHER_EDGE: self._edge_EITHER
         }
         handler = level_handlers[level]
-        diff = pigpio.tickDiff(self.high_tick, tick)
+        diff = asyncpio.tickDiff(self.high_tick, tick)
         handler(tick, diff)
 
     def _edge_RISE(self, tick, diff):
@@ -119,11 +121,11 @@ class DHT11(object):
         """
         Start reading over DHT11 sensor.
         """
-        self.pi.write(self.gpio, pigpio.LOW)
-        time.sleep(0.017) # 17 ms
-        self.pi.set_mode(self.gpio, pigpio.INPUT)
+        self.pi.write(self.gpio, asyncpio.LOW)
+        asyncio.sleep(0.017) # 17 ms
+        self.pi.set_mode(self.gpio, asyncpio.INPUT)
         self.pi.set_watchdog(self.gpio, 200)
-        time.sleep(0.2)
+        asyncio.sleep(0.2)
 
     def close(self):
         """
@@ -152,9 +154,8 @@ class DHT11(object):
         return response
 
 
-if __name__ == '__main__':
-    pi = pigpio.pi()
-    sensor = DHT11(pi, 4)
+    pi = asyncpio.pi()
+    sensor = DHT11.create(pi, 4)
     for d in sensor:
         print("temperature: {}".format(d['temperature']))
         print("humidity: {}".format(d['humidity']))

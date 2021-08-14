@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pigpio
+import asyncpio
 
 morse={
 'a':'.-'   , 'b':'-...' , 'c':'-.-.' , 'd':'-..'  , 'e':'.'    ,
@@ -39,24 +39,24 @@ def transmit_string(pi, gpio, str):
          for x in k:
 
             if x == '.':
-               wf.append(pigpio.pulse(1<<gpio, NONE, DOT * MICROS))
+               wf.append(asyncpio.pulse(1<<gpio, NONE, DOT * MICROS))
             else:
-               wf.append(pigpio.pulse(1<<gpio, NONE, DASH * MICROS))
+               wf.append(asyncpio.pulse(1<<gpio, NONE, DASH * MICROS))
 
-            wf.append(pigpio.pulse(NONE, 1<<gpio, GAP * MICROS))
+            wf.append(asyncpio.pulse(NONE, 1<<gpio, GAP * MICROS))
 
-         wf.append(pigpio.pulse(NONE, 1<<gpio, LETTER_GAP * MICROS))
+         wf.append(asyncpio.pulse(NONE, 1<<gpio, LETTER_GAP * MICROS))
 
       elif c == ' ':
-         wf.append(pigpio.pulse(NONE, 1<<gpio, WORD_GAP * MICROS))
+         wf.append(asyncpio.pulse(NONE, 1<<gpio, WORD_GAP * MICROS))
 
    pi.wave_add_generic(wf)
 
    pi.wave_tx_start()
 
-pi = pigpio.pi()
+pi = asyncpio.pi()
 
-pi.set_mode(GPIO, pigpio.OUTPUT)
+pi.set_mode(GPIO, asyncpio.OUTPUT)
 
 transmit_string(pi, GPIO, "Now is the winter of our discontent")
 

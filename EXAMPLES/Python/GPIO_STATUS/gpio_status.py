@@ -5,7 +5,7 @@ import curses
 import atexit
 import sys
 
-import pigpio 
+import asyncpio
 
 GPIOS=32
 
@@ -17,7 +17,7 @@ def cleanup():
    curses.endwin()
    pi.stop()
 
-pi = pigpio.pi()
+pi = asyncpio.pi()
 if not pi.connected:
     sys.exit(1)
 
@@ -30,7 +30,7 @@ atexit.register(cleanup)
 cb = []
 
 for g in range(GPIOS):
-   cb.append(pi.callback(g, pigpio.EITHER_EDGE))
+   cb.append(pi.callback(g, asyncpio.EITHER_EDGE))
 
 # disable gpio 28 as the PCM clock is swamping the system
 

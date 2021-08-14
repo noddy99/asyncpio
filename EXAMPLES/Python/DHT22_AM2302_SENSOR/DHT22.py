@@ -5,7 +5,7 @@
 import time
 import atexit
 
-import pigpio
+import asyncpio
 
 class sensor:
    """
@@ -80,18 +80,18 @@ class sensor:
       self.high_tick = 0
       self.bit = 40
 
-      pi.set_pull_up_down(gpio, pigpio.PUD_OFF)
+      pi.set_pull_up_down(gpio, asyncpio.PUD_OFF)
 
       pi.set_watchdog(gpio, 0)  # Kill any watchdogs.
 
-      self.cb = pi.callback(gpio, pigpio.EITHER_EDGE, self._cb)
+      self.cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cb)
 
    def _cb(self, gpio, level, tick):
       """
       Accumulate the 40 data bits.  Format into 5 bytes, humidity high,
       humidity low, temperature high, temperature low, checksum.
       """
-      diff = pigpio.tickDiff(self.high_tick, tick)
+      diff = asyncpio.tickDiff(self.high_tick, tick)
 
       if level == 0:
 
@@ -168,7 +168,7 @@ class sensor:
             self.tL = 0
             self.CS = 0
 
-      else:  # level == pigpio.TIMEOUT:
+      else:  # level == asyncpio.TIMEOUT:
          self.pi.set_watchdog(self.gpio, 0)
          if self.bit < 8:       # Too few data bits received.
             self.bad_MM += 1    # Bump missing message count.
@@ -227,9 +227,9 @@ class sensor:
          if self.LED is not None:
             self.pi.write(self.LED, 1)
 
-         self.pi.write(self.gpio, pigpio.LOW)
+         self.pi.write(self.gpio, asyncpio.LOW)
          time.sleep(0.017)  # 17 ms
-         self.pi.set_mode(self.gpio, pigpio.INPUT)
+         self.pi.set_mode(self.gpio, asyncpio.INPUT)
          self.pi.set_watchdog(self.gpio, 200)
 
    def cancel(self):
@@ -245,14 +245,14 @@ if __name__ == "__main__":
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import DHT22
 
    # Intervals of about 2 seconds or less will eventually hang the DHT22.
    INTERVAL = 3
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    s = DHT22.sensor(pi, 22, LED=16, power=8)
 

@@ -2,7 +2,7 @@
 
 import time
 
-import pigpio
+import asyncpio
 
 class sniffer:
    """
@@ -54,11 +54,11 @@ class sniffer:
       self.transact = ""
 
       if set_as_inputs:
-         self.pi.set_mode(SCL, pigpio.INPUT)
-         self.pi.set_mode(SDA, pigpio.INPUT)
+         self.pi.set_mode(SCL, asyncpio.INPUT)
+         self.pi.set_mode(SDA, asyncpio.INPUT)
 
-      self.cbA = self.pi.callback(SCL, pigpio.EITHER_EDGE, self._cb)
-      self.cbB = self.pi.callback(SDA, pigpio.EITHER_EDGE, self._cb)
+      self.cbA = self.pi.callback(SCL, asyncpio.EITHER_EDGE, self._cb)
+      self.cbB = self.pi.callback(SDA, asyncpio.EITHER_EDGE, self._cb)
 
    def _parse(self, SCL, SDA):
       """
@@ -147,11 +147,11 @@ if __name__ == "__main__":
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import I2C_sniffer
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    s = I2C_sniffer.sniffer(pi, 1, 0, False) # leave gpios 1/0 in I2C mode
 

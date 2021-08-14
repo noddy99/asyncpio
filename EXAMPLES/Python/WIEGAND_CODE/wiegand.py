@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pigpio
+import asyncpio
 
 class decoder:
 
@@ -15,14 +15,14 @@ class decoder:
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import wiegand
 
    def callback(bits, code):
       print("bits={} code={}".format(bits, code))
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    w = wiegand.decoder(pi, 14, 15, callback)
 
@@ -53,14 +53,14 @@ class decoder:
 
       self.in_code = False
 
-      self.pi.set_mode(gpio_0, pigpio.INPUT)
-      self.pi.set_mode(gpio_1, pigpio.INPUT)
+      self.pi.set_mode(gpio_0, asyncpio.INPUT)
+      self.pi.set_mode(gpio_1, asyncpio.INPUT)
 
-      self.pi.set_pull_up_down(gpio_0, pigpio.PUD_UP)
-      self.pi.set_pull_up_down(gpio_1, pigpio.PUD_UP)
+      self.pi.set_pull_up_down(gpio_0, asyncpio.PUD_UP)
+      self.pi.set_pull_up_down(gpio_1, asyncpio.PUD_UP)
 
-      self.cb_0 = self.pi.callback(gpio_0, pigpio.FALLING_EDGE, self._cb)
-      self.cb_1 = self.pi.callback(gpio_1, pigpio.FALLING_EDGE, self._cb)
+      self.cb_0 = self.pi.callback(gpio_0, asyncpio.FALLING_EDGE, self._cb)
+      self.cb_1 = self.pi.callback(gpio_1, asyncpio.FALLING_EDGE, self._cb)
 
    def _cb(self, gpio, level, tick):
 
@@ -68,7 +68,7 @@ class decoder:
       Accumulate bits until both gpios 0 and 1 timeout.
       """
 
-      if level < pigpio.TIMEOUT:
+      if level < asyncpio.TIMEOUT:
 
          if self.in_code == False:
             self.bits = 1
@@ -116,14 +116,14 @@ if __name__ == "__main__":
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import wiegand
 
    def callback(bits, value):
       print("bits={} value={}".format(bits, value))
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    w = wiegand.decoder(pi, 14, 15, callback)
 

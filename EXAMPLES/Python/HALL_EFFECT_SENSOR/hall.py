@@ -2,7 +2,7 @@
 
 import time
 
-import pigpio
+import asyncpio
 
 #
 # OH3144E or equivalent Hall effect sensor
@@ -17,10 +17,10 @@ import pigpio
 
 HALL=14
 
-pi = pigpio.pi() # connect to local Pi
+pi = asyncpio.pi() # connect to local Pi
 
-pi.set_mode(HALL, pigpio.INPUT)
-pi.set_pull_up_down(HALL, pigpio.PUD_UP)
+pi.set_mode(HALL, asyncpio.INPUT)
+pi.set_pull_up_down(HALL, asyncpio.PUD_UP)
 
 start = time.time()
 

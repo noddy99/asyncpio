@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pigpio
+import asyncpio
 
 class decoder:
 
@@ -19,7 +19,7 @@ class decoder:
       EXAMPLE
 
       import time
-      import pigpio
+      import asyncpio
 
       import rotary_encoder
 
@@ -33,7 +33,7 @@ class decoder:
 
          print("pos={}".format(pos))
 
-      pi = pigpio.pi()
+      pi = asyncpio.pi()
 
       decoder = rotary_encoder.decoder(pi, 7, 8, callback)
 
@@ -55,14 +55,14 @@ class decoder:
 
       self.lastGpio = None
 
-      self.pi.set_mode(gpioA, pigpio.INPUT)
-      self.pi.set_mode(gpioB, pigpio.INPUT)
+      self.pi.set_mode(gpioA, asyncpio.INPUT)
+      self.pi.set_mode(gpioB, asyncpio.INPUT)
 
-      self.pi.set_pull_up_down(gpioA, pigpio.PUD_UP)
-      self.pi.set_pull_up_down(gpioB, pigpio.PUD_UP)
+      self.pi.set_pull_up_down(gpioA, asyncpio.PUD_UP)
+      self.pi.set_pull_up_down(gpioB, asyncpio.PUD_UP)
 
-      self.cbA = self.pi.callback(gpioA, pigpio.EITHER_EDGE, self._pulse)
-      self.cbB = self.pi.callback(gpioB, pigpio.EITHER_EDGE, self._pulse)
+      self.cbA = self.pi.callback(gpioA, asyncpio.EITHER_EDGE, self._pulse)
+      self.cbB = self.pi.callback(gpioB, asyncpio.EITHER_EDGE, self._pulse)
 
    def _pulse(self, gpio, level, tick):
 
@@ -109,7 +109,7 @@ class decoder:
 if __name__ == "__main__":
 
    import time
-   import pigpio
+   import asyncpio
 
    import rotary_encoder
 
@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
       print("pos={}".format(pos))
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    decoder = rotary_encoder.decoder(pi, 7, 8, callback)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pigpio
+import asyncpio
 
 class hasher:
 
@@ -22,13 +22,13 @@ class hasher:
    #!/usr/bin/env python
 
    import time
-   import pigpio
+   import asyncpio
    import ir_hasher
 
    def callback(hash):
       print("hash={}".format(hash));
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    ir = ir_hasher.hasher(pi, 7, callback, 5)
 
@@ -53,9 +53,9 @@ class hasher:
 
       self.in_code = False
 
-      pi.set_mode(gpio, pigpio.INPUT)
+      pi.set_mode(gpio, asyncpio.INPUT)
 
-      self.cb = pi.callback(gpio, pigpio.EITHER_EDGE, self._cb)
+      self.cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cb)
 
    def _hash(self, old_val, new_val):
 
@@ -72,7 +72,7 @@ class hasher:
 
    def _cb(self, gpio, level, tick):
 
-      if level != pigpio.TIMEOUT:
+      if level != asyncpio.TIMEOUT:
 
          if self.in_code == False:
 
@@ -100,8 +100,8 @@ class hasher:
 
             if self.t1 is not None:
 
-               d1 = pigpio.tickDiff(self.t1,self.t2)
-               d2 = pigpio.tickDiff(self.t3,self.t4)
+               d1 = asyncpio.tickDiff(self.t1,self.t2)
+               d2 = asyncpio.tickDiff(self.t3,self.t4)
 
                self._hash(d1, d2)
 
@@ -120,7 +120,7 @@ class hasher:
 if __name__ == "__main__":
 
    import time
-   import pigpio
+   import asyncpio
    import ir_hasher
 
    hashes = {
@@ -153,7 +153,7 @@ if __name__ == "__main__":
       if hash in hashes:
          print("key={} hash={}".format(hashes[hash], hash));
 
-   pi = pigpio.pi()
+   pi = asyncpio.pi()
 
    ir = ir_hasher.hasher(pi, 7, callback, 5)
 

@@ -5,7 +5,7 @@
 import time
 import curses
 
-import pigpio
+import asyncpio
 
 # sudo pigpiod
 # ./PCF8591.py
@@ -14,10 +14,10 @@ import pigpio
 
 YL_40=0x48
 
-pi = pigpio.pi() # Connect to local Pi.
+pi = asyncpio.pi() # Connect to local Pi.
 
 handle = pi.i2c_open(1, YL_40, 0)
- 
+
 stdscr = curses.initscr()
 
 curses.noecho()

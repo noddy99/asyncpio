@@ -10,7 +10,7 @@ It has been tested between a Pi, TI Launchpad, and Arduino Pro Mini.
 
 import time
 
-import pigpio
+import asyncpio
 
 MAX_MESSAGE_BYTES=77
 
@@ -66,16 +66,16 @@ class tx():
 
       pi.wave_add_new()
 
-      pi.set_mode(txgpio, pigpio.OUTPUT)
+      pi.set_mode(txgpio, asyncpio.OUTPUT)
 
 
    def _nibble(self, nibble):
 
       for i in range(6):
          if nibble & (1<<i):
-            self.wf.append(pigpio.pulse(self.txbit, 0, self.mics))
+            self.wf.append(asyncpio.pulse(self.txbit, 0, self.mics))
          else:
-            self.wf.append(pigpio.pulse(0, self.txbit, self.mics))
+            self.wf.append(asyncpio.pulse(0, self.txbit, self.mics))
 
    def _byte(self, crc, byte):
       self._nibble(_SYMBOL[byte>>4])
@@ -184,9 +184,9 @@ class rx():
       self.message_len = 0
       self.byte = 0
 
-      pi.set_mode(rxgpio, pigpio.INPUT)
+      pi.set_mode(rxgpio, asyncpio.INPUT)
 
-      self.cb = pi.callback(rxgpio, pigpio.EITHER_EDGE, self._cb)
+      self.cb = pi.callback(rxgpio, asyncpio.EITHER_EDGE, self._cb)
 
    def _calc_crc(self):
 
@@ -249,7 +249,7 @@ class rx():
 
       if self.last_tick is not None:
 
-         if level == pigpio.TIMEOUT:
+         if level == asyncpio.TIMEOUT:
 
             self.pi.set_watchdog(self.rxgpio, 0) # Switch watchdog off.
 
@@ -261,7 +261,7 @@ class rx():
 
          else:
 
-            edge = pigpio.tickDiff(self.last_tick, tick)
+            edge = asyncpio.tickDiff(self.last_tick, tick)
 
             if edge < self.min_mics:
 
@@ -280,7 +280,7 @@ class rx():
 
                self.good += 1
 
-               if self.good > 8: 
+               if self.good > 8:
 
                   bitlen = (100 * edge) / self.mics
 
@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
    import time
 
-   import pigpio
+   import asyncpio
 
    import vw
 
@@ -335,7 +335,7 @@ if __name__ == "__main__":
 
    BPS=2000
 
-   pi = pigpio.pi() # Connect to local Pi.
+   pi = asyncpio.pi() # Connect to local Pi.
 
    rx = vw.rx(pi, RX, BPS) # Specify Pi, rx gpio, and baud.
    tx = vw.tx(pi, TX, BPS) # Specify Pi, tx gpio, and baud.
