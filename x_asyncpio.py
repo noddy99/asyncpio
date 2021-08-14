@@ -11,6 +11,7 @@
 #* many failures in a group of tests indicate a problem.    *
 #************************************************************
 
+import asyncio
 import sys
 import time
 import struct
@@ -45,11 +46,11 @@ def CHECK(t, st, got, expect, pc, desc):
 
 def t0():
 
-   print("\nTesting pigpio Python module {}".format(pigpio.VERSION))
+   print("\nTesting asyncpio Python module {}".format(asyncpio.VERSION))
 
    print("Python {}".format(sys.version.replace("\n", " ")))
 
-   print("pigpio version {}.".format(pi.get_pigpio_version()))
+   print("asyncpio version {}.".format(pi.get_pigpio_version()))
 
    print("Hardware revision {}.".format(pi.get_hardware_revision()))
 
@@ -57,26 +58,26 @@ def t1():
 
    print("Mode/PUD/read/write tests.")
 
-   pi.set_mode(GPIO, pigpio.INPUT)
+   pi.set_mode(GPIO, asyncpio.INPUT)
    v = pi.get_mode(GPIO)
    CHECK(1, 1, v, 0, 0, "set mode, get mode")
 
-   pi.set_pull_up_down(GPIO, pigpio.PUD_UP)
+   pi.set_pull_up_down(GPIO, asyncpio.PUD_UP)
    v = pi.read(GPIO)
    CHECK(1, 2, v, 1, 0, "set pull up down, read")
 
-   pi.set_pull_up_down(GPIO, pigpio.PUD_DOWN)
+   pi.set_pull_up_down(GPIO, asyncpio.PUD_DOWN)
    v = pi.read(GPIO)
    CHECK(1, 3, v, 0, 0, "set pull up down, read")
 
-   pi.write(GPIO, pigpio.LOW)
+   pi.write(GPIO, asyncpio.LOW)
    v = pi.get_mode(GPIO)
    CHECK(1, 4, v, 1, 0, "write, get mode")
 
    v = pi.read(GPIO)
    CHECK(1, 5, v, 0, 0, "read")
 
-   pi.write(GPIO, pigpio.HIGH)
+   pi.write(GPIO, asyncpio.HIGH)
    v = pi.read(GPIO)
    CHECK(1, 6, v, 1, 0, "write, read")
 
@@ -97,7 +98,7 @@ def t2():
    f = pi.get_PWM_frequency(GPIO)
    CHECK(2, 1, f, 10, 0, "set PWM range, set/get PWM frequency")
 
-   t2cb = pi.callback(GPIO, pigpio.EITHER_EDGE, t2cbf)
+   t2cb = pi.callback(GPIO, asyncpio.EITHER_EDGE, t2cbf)
 
    pi.set_PWM_dutycycle(GPIO, 0)
    dc = pi.get_PWM_dutycycle(GPIO)
@@ -171,7 +172,7 @@ def t3cbf(gpio, level, tick):
       t3_off = 0.0
       t3_reset = False
    else:
-      td = pigpio.tickDiff(t3_tick, tick)
+      td = asyncpio.tickDiff(t3_tick, tick)
 
       if level == 0:
          t3_on += td
@@ -190,7 +191,7 @@ def t3():
 
    print("PWM/Servo pulse accuracy tests.")
 
-   t3cb = pi.callback(GPIO, pigpio.EITHER_EDGE, t3cbf)
+   t3cb = pi.callback(GPIO, asyncpio.EITHER_EDGE, t3cbf)
 
    t = 0
    for x in pw:
@@ -342,19 +343,19 @@ To the lascivious pleasing of a lute.
 
    print("Waveforms & bit bang serial read/write tests.")
 
-   t5cb = pi.callback(GPIO, pigpio.FALLING_EDGE, t5cbf)
+   t5cb = pi.callback(GPIO, asyncpio.FALLING_EDGE, t5cbf)
 
-   pi.set_mode(GPIO, pigpio.OUTPUT)
+   pi.set_mode(GPIO, asyncpio.OUTPUT)
 
    e = pi.wave_clear()
    CHECK(5, 1, e, 0, 0, "callback, set mode, wave clear")
 
    wf = []
 
-   wf.append(pigpio.pulse(1<<GPIO, 0,  10000))
-   wf.append(pigpio.pulse(0, 1<<GPIO,  30000))
-   wf.append(pigpio.pulse(1<<GPIO, 0,  60000))
-   wf.append(pigpio.pulse(0, 1<<GPIO, 100000))
+   wf.append(asyncpio.pulse(1<<GPIO, 0,  10000))
+   wf.append(asyncpio.pulse(0, 1<<GPIO,  30000))
+   wf.append(asyncpio.pulse(1<<GPIO, 0,  60000))
+   wf.append(asyncpio.pulse(0, 1<<GPIO, 100000))
 
    e = pi.wave_add_generic(wf)
    CHECK(5, 2, e, 4, 0, "pulse, wave add generic")
@@ -483,35 +484,35 @@ To the lascivious pleasing of a lute.
    e = pi.wave_delete(0)
    CHECK(5, 33, e, 0, 0, "wave delete")
 
-   # wave_create_and_pad tests 
-   t5cb = pi.callback(GPIO, pigpio.FALLING_EDGE, t5cbf)
+   # wave_create_and_pad tests
+   t5cb = pi.callback(GPIO, asyncpio.FALLING_EDGE, t5cbf)
    pi.wave_clear()
 
-   pi.wave_add_generic([pigpio.pulse(1<<GPIO, 0,  10000),
-                        pigpio.pulse(0, 1<<GPIO,  30000)])
+   pi.wave_add_generic([asyncpio.pulse(1<<GPIO, 0,  10000),
+                        asyncpio.pulse(0, 1<<GPIO,  30000)])
    wid = pi.wave_create_and_pad(50)
    CHECK(5, 34, wid, 0, 0, "wave create and pad, wid==")
 
-   pi.wave_add_generic([pigpio.pulse(1<<GPIO, 0,  10000),
-                        pigpio.pulse(0, 1<<GPIO,  30000),
-                        pigpio.pulse(1<<GPIO, 0,  60000),
-                        pigpio.pulse(0, 1<<GPIO, 100000)])
+   pi.wave_add_generic([asyncpio.pulse(1<<GPIO, 0,  10000),
+                        asyncpio.pulse(0, 1<<GPIO,  30000),
+                        asyncpio.pulse(1<<GPIO, 0,  60000),
+                        asyncpio.pulse(0, 1<<GPIO, 100000)])
    wid = pi.wave_create_and_pad(50)
    CHECK(5, 35, wid, 1, 0, "wave create and pad, wid==")
 
    c = pi.wave_delete(0);
    CHECK(5, 36, c, 0, 0, "delete wid==0 success");
-   
-   pi.wave_add_generic([pigpio.pulse(1<<GPIO, 0,  10000),
-                        pigpio.pulse(0, 1<<GPIO,  30000),
-                        pigpio.pulse(1<<GPIO, 0,  60000),
-                        pigpio.pulse(0, 1<<GPIO, 100000),
-                        pigpio.pulse(1<<GPIO, 0,  60000),
-                        pigpio.pulse(0, 1<<GPIO, 100000)])
-   pigpio.exceptions = False
+
+   pi.wave_add_generic([asyncpio.pulse(1<<GPIO, 0,  10000),
+                        asyncpio.pulse(0, 1<<GPIO,  30000),
+                        asyncpio.pulse(1<<GPIO, 0,  60000),
+                        asyncpio.pulse(0, 1<<GPIO, 100000),
+                        asyncpio.pulse(1<<GPIO, 0,  60000),
+                        asyncpio.pulse(0, 1<<GPIO, 100000)])
+   asyncpio.exceptions = False
    c = pi.wave_create()
    CHECK(5, 37, c, -67, 0, "No more CBs using wave create")
-   pigpio.exceptions = True
+   asyncpio.exceptions = True
 
    wid = pi.wave_create_and_pad(50)
    CHECK(5, 38, wid, 0, 0, "wave create pad, count==3, wid==")
@@ -537,18 +538,18 @@ def t6cbf(gpio, level, tick):
       t6_count += 1
    else:
       if t6_on_tick is not None:
-         t6_on += pigpio.tickDiff(t6_on_tick, tick)
+         t6_on += asyncpio.tickDiff(t6_on_tick, tick)
 
 def t6():
    global t6_count, t6_on
 
    print("Trigger tests.")
 
-   pi.write(GPIO, pigpio.LOW)
+   pi.write(GPIO, asyncpio.LOW)
 
    tp = 0
 
-   t6cb = pi.callback(GPIO, pigpio.EITHER_EDGE, t6cbf)
+   t6cb = pi.callback(GPIO, asyncpio.EITHER_EDGE, t6cbf)
 
    for t in range(5):
       time.sleep(0.1)
@@ -568,7 +569,7 @@ t7_count=0
 
 def t7cbf(gpio, level, tick):
    global t7_count
-   if level == pigpio.TIMEOUT:
+   if level == asyncpio.TIMEOUT:
       t7_count += 1
 
 def t7():
@@ -577,7 +578,7 @@ def t7():
    print("Watchdog tests.")
 
    # type of edge shouldn't matter for watchdogs
-   t7cb = pi.callback(GPIO, pigpio.FALLING_EDGE, t7cbf)
+   t7cb = pi.callback(GPIO, asyncpio.FALLING_EDGE, t7cbf)
 
    pi.set_watchdog(GPIO, 50) # 50 ms, 20 per second
    time.sleep(0.5)
@@ -626,24 +627,24 @@ def t8():
    v = pi.clear_bank_2(0)
    CHECK(8, 6, v, 0, 0, "clear bank 2")
 
-   pigpio.exceptions = False
+   asyncpio.exceptions = False
    v = pi.clear_bank_2(0xffffff)
-   pigpio.exceptions = True
-   CHECK(8, 7, v, pigpio.PI_SOME_PERMITTED, 0, "clear bank 2")
+   asyncpio.exceptions = True
+   CHECK(8, 7, v, asyncpio.PI_SOME_PERMITTED, 0, "clear bank 2")
 
    v = pi.set_bank_2(0)
    CHECK(8, 8, v, 0, 0, "set bank 2")
 
-   pigpio.exceptions = False
+   asyncpio.exceptions = False
    v = pi.set_bank_2(0xffffff)
-   pigpio.exceptions = True
-   CHECK(8, 9, v, pigpio.PI_SOME_PERMITTED, 0, "set bank 2")
+   asyncpio.exceptions = True
+   CHECK(8, 9, v, asyncpio.PI_SOME_PERMITTED, 0, "set bank 2")
 
 def t9waitNotHalted(s):
    for check in range(10):
       time.sleep(0.1)
       e, p = pi.script_status(s)
-      if e != pigpio.PI_SCRIPT_HALTED:
+      if e != asyncpio.PI_SCRIPT_HALTED:
          return
 
 def t9():
@@ -666,16 +667,16 @@ def t9():
 
    t9cb = pi.callback(GPIO)
 
-   old_exceptions = pigpio.exceptions
+   old_exceptions = asyncpio.exceptions
 
-   pigpio.exceptions = False
+   asyncpio.exceptions = False
 
    s = pi.store_script(script)
 
    # Ensure the script has finished initing.
    while True:
       e, p = pi.script_status(s)
-      if e != pigpio.PI_SCRIPT_INITING:
+      if e != asyncpio.PI_SCRIPT_INITING:
          break
       time.sleep(0.1)
 
@@ -686,7 +687,7 @@ def t9():
 
    while True:
       e, p = pi.script_status(s)
-      if e != pigpio.PI_SCRIPT_RUNNING:
+      if e != asyncpio.PI_SCRIPT_RUNNING:
          break
       time.sleep(0.1)
    time.sleep(0.2)
@@ -700,7 +701,7 @@ def t9():
 
    while True:
       e, p = pi.script_status(s)
-      if e != pigpio.PI_SCRIPT_RUNNING:
+      if e != asyncpio.PI_SCRIPT_RUNNING:
          break
       time.sleep(0.1)
    time.sleep(0.2)
@@ -714,7 +715,7 @@ def t9():
 
    while True:
       e, p = pi.script_status(s)
-      if e != pigpio.PI_SCRIPT_RUNNING:
+      if e != asyncpio.PI_SCRIPT_RUNNING:
          break
       if p[9] < 1900:
          pi.stop_script(s)
@@ -728,7 +729,7 @@ def t9():
 
    t9cb.cancel()
 
-   pigpio.exceptions = old_exceptions
+   asyncpio.exceptions = old_exceptions
 
 def ta():
    print("Serial link tests.")
@@ -903,21 +904,21 @@ def td():
 
    tdcb = pi.callback(GPIO)
 
-   pi.set_mode(GPIO, pigpio.OUTPUT)
+   pi.set_mode(GPIO, asyncpio.OUTPUT)
 
-   pi.write(GPIO, pigpio.LOW)
+   pi.write(GPIO, asyncpio.LOW)
 
    e = pi.wave_clear()
    CHECK(13, 1, e, 0, 0, "callback, set mode, wave clear")
 
    wf = []
 
-   wf.append(pigpio.pulse(1<<GPIO, 0,  50))
-   wf.append(pigpio.pulse(0, 1<<GPIO,  70))
-   wf.append(pigpio.pulse(1<<GPIO, 0, 130))
-   wf.append(pigpio.pulse(0, 1<<GPIO, 150))
-   wf.append(pigpio.pulse(1<<GPIO, 0,  90))
-   wf.append(pigpio.pulse(0, 1<<GPIO, 110))
+   wf.append(asyncpio.pulse(1<<GPIO, 0,  50))
+   wf.append(asyncpio.pulse(0, 1<<GPIO,  70))
+   wf.append(asyncpio.pulse(1<<GPIO, 0, 130))
+   wf.append(asyncpio.pulse(0, 1<<GPIO, 150))
+   wf.append(asyncpio.pulse(1<<GPIO, 0,  90))
+   wf.append(asyncpio.pulse(0, 1<<GPIO, 110))
 
    e = pi.wave_add_generic(wf)
    CHECK(13, 2, e, 6, 0, "pulse, wave add generic")
@@ -1017,25 +1018,25 @@ if len(sys.argv) > 1:
 else:
    tests = "0123456789d"
 
-pi = pigpio.pi()
+pi = asyncpio.pi()
+asyncio.run(pi.connect())
 
-if pi.connected:
-   print("Connected to pigpio daemon.")
+print("Connected to pigpio daemon.")
 
-   if '0' in tests: t0()
-   if '1' in tests: t1()
-   if '2' in tests: t2()
-   if '3' in tests: t3()
-   if '4' in tests: t4()
-   if '5' in tests: t5()
-   if '6' in tests: t6()
-   if '7' in tests: t7()
-   if '8' in tests: t8()
-   if '9' in tests: t9()
-   if 'a' in tests: ta()
-   if 'b' in tests: tb()
-   if 'c' in tests: tc()
-   if 'd' in tests: td()
+if '0' in tests: t0()
+if '1' in tests: t1()
+if '2' in tests: t2()
+if '3' in tests: t3()
+if '4' in tests: t4()
+if '5' in tests: t5()
+if '6' in tests: t6()
+if '7' in tests: t7()
+if '8' in tests: t8()
+if '9' in tests: t9()
+if 'a' in tests: ta()
+if 'b' in tests: tb()
+if 'c' in tests: tc()
+if 'd' in tests: td()
 
-pi.stop()
+asyncio.run(pi.stop())
 
