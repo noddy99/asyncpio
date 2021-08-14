@@ -35,28 +35,33 @@ class DHT11(object):
         self.temperature = 0
         self.humidity = 0
         self.either_edge_cb = None
-        self.setup()
 
-    def setup(self):
+    @classmethod
+    async def create(cls, pi, gpio):
+        self = cls(pi, gpio)
+        await self.setup()
+        return self
+
+    async def setup(self):
         """
         Clears the internal gpio pull-up/down resistor.
         Kills any watchdogs.
         """
-        self.pi.set_pull_up_down(self.gpio, asyncpio.PUD_OFF)
-        self.pi.set_watchdog(self.gpio, 0)
-        self.register_callbacks()
+        await self.pi.set_pull_up_down(self.gpio, asyncpio.PUD_OFF)
+        await self.pi.set_watchdog(self.gpio, 0)
+        await self.register_callbacks()
 
-    def register_callbacks(self):
+    async def register_callbacks(self):
         """
         Monitors RISING_EDGE changes using callback.
         """
-        self.either_edge_cb = self.pi.callback(
+        self.either_edge_cb = await self.pi.callback(
             self.gpio,
             asyncpio.EITHER_EDGE,
             self.either_edge_callback
         )
 
-    def either_edge_callback(self, gpio, level, tick):
+    async def either_edge_callback(self, gpio, level, tick):
         """
         Either Edge callbacks, called each time the gpio edge changes.
         Accumulate the 40 data bits from the dht11 sensor.
@@ -68,9 +73,9 @@ class DHT11(object):
         }
         handler = level_handlers[level]
         diff = asyncpio.tickDiff(self.high_tick, tick)
-        handler(tick, diff)
+        await handler(tick, diff)
 
-    def _edge_RISE(self, tick, diff):
+    async def _edge_RISE(self, tick, diff):
         """
         Handle Rise signal.
         """
@@ -86,7 +91,7 @@ class DHT11(object):
             self.checksum = (self.checksum << 1) + val
             if self.bit == 39:
                 # 40th bit received
-                self.pi.set_watchdog(self.gpio, 0)
+                await self.pi.set_watchdog(self.gpio, 0)
                 total = self.humidity + self.temperature
                 # is checksum ok ?
                 if not (total & 255) == self.checksum:
@@ -99,7 +104,7 @@ class DHT11(object):
             pass
         self.bit += 1
 
-    def _edge_FALL(self, tick, diff):
+    async def _edge_FALL(self, tick, diff):
         """
         Handle Fall signal.
         """
@@ -111,42 +116,42 @@ class DHT11(object):
         self.temperature = 0
         self.humidity = 0
 
-    def _edge_EITHER(self, tick, diff):
+    async def _edge_EITHER(self, tick, diff):
         """
         Handle Either signal.
         """
-        self.pi.set_watchdog(self.gpio, 0)
+        await self.pi.set_watchdog(self.gpio, 0)
 
-    def read(self):
+    async def read(self):
         """
         Start reading over DHT11 sensor.
         """
-        self.pi.write(self.gpio, asyncpio.LOW)
-        asyncio.sleep(0.017) # 17 ms
-        self.pi.set_mode(self.gpio, asyncpio.INPUT)
-        self.pi.set_watchdog(self.gpio, 200)
-        asyncio.sleep(0.2)
+        await self.pi.write(self.gpio, asyncpio.LOW)
+        await asyncio.sleep(0.017) # 17 ms
+        await self.pi.set_mode(self.gpio, asyncpio.INPUT)
+        await self.pi.set_watchdog(self.gpio, 200)
+        await asyncio.sleep(0.2)
 
-    def close(self):
+    async def close(self):
         """
         Stop reading sensor, remove callbacks.
         """
-        self.pi.set_watchdog(self.gpio, 0)
+        await self.pi.set_watchdog(self.gpio, 0)
         if self.either_edge_cb:
-            self.either_edge_cb.cancel()
+            await self.either_edge_cb.cancel()
             self.either_edge_cb = None
 
-    def __iter__(self):
+    def __aiter__(self):
         """
         Support the iterator protocol.
         """
         return self
 
-    def next(self):
+    async def __anext__(self):
         """
         Call the read method and return temperature and humidity informations.
         """
-        self.read()
+        await self.read()
         response =  {
             'humidity': self.humidity,
             'temperature': self.temperature
@@ -154,11 +159,17 @@ class DHT11(object):
         return response
 
 
+async def main():
     pi = asyncpio.pi()
-    sensor = DHT11.create(pi, 4)
-    for d in sensor:
+    await pi.connect()
+    sensor = await DHT11.create(pi, 4)
+    async for d in sensor:
         print("temperature: {}".format(d['temperature']))
         print("humidity: {}".format(d['humidity']))
-        time.sleep(1)
-    sensor.close()
+        asyncio.sleep(1)
+    await sensor.close()
 
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
