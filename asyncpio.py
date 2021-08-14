@@ -76,7 +76,7 @@ start).
 
 sudo pigpiod
 
-Your Python program must import pigpio and create one or more
+Your Python program must import asyncpio and create one or more
 instances of the asyncpio.pi class.  This class gives access to
 a specified Pi's GPIO.
 
@@ -3780,7 +3780,7 @@ class pi():
       ...
       #!/usr/bin/env python
 
-      import pigpio
+      import asyncpio
 
       # Choose some random GPIO for the bit-bang SPI master
       CE=15
@@ -3788,22 +3788,28 @@ class pi():
       MOSI=13
       SCLK=14
 
-      pi = pigpio.pi()
-      if not pi.connected:
-         exit()
+      async def main(pi):
+          try:
+              await pi.connect()
+          except:
+              exit()
 
-      pi.bb_spi_open(CE, MISO, MOSI, SCLK, 10000, 0) # open SPI master
-      pi.bsc_xfer(0x303, []) # start BSC as SPI slave
-      pi.bb_spi_xfer(CE, '\0' + 'hello') # write 'hello' to BSC
-      status, count, bsc_data = pi.bsc_xfer(0x303, 'world')
-      print bsc_data # hello
-      count, spi_data = pi.bb_spi_xfer(CE, [1,0,0,0,0,0])
-      print spi_data # world
+          pi.bb_spi_open(CE, MISO, MOSI, SCLK, 10000, 0) # open SPI master
+          pi.bsc_xfer(0x303, []) # start BSC as SPI slave
+          pi.bb_spi_xfer(CE, '\0' + 'hello') # write 'hello' to BSC
+          status, count, bsc_data = pi.bsc_xfer(0x303, 'world')
+          print bsc_data # hello
+          count, spi_data = pi.bb_spi_xfer(CE, [1,0,0,0,0,0])
+          print spi_data # world
 
-      pi.bsc_xfer(0, [])
-      pi.bb_spi_close(CE)
+          pi.bsc_xfer(0, [])
+          pi.bb_spi_close(CE)
 
-      pi.stop()
+          await pi.stop()
+
+      pi = asyncpio.pi()
+      loop = asyncio.get_event_loop()
+      loop.run_until_complete(main(pi))
       ...
       """
       # I p1 control
