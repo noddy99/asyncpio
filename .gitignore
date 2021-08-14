@@ -1,5 +1,6 @@
 *.o
 *.so
+*.so.*
 *.pyc
 pig2vcd
 pigpiod
@@ -13,3 +14,12 @@ dist
 *.egg-info
 .vscode
 .idea
+
+tmp/
+
+# DOC files
+DOC/dbase/pigpio.sqlite.*
+DOC/tmp
+DOC/MAN/*
+!DOC/MAN/README*
+DOC/HTML/*.html
