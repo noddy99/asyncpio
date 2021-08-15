@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import asyncio
 import time
 
 import asyncpio
@@ -17,16 +18,18 @@ import asyncpio
 
 HALL=14
 
-pi = asyncpio.pi() # connect to local Pi
+async def main():
+    pi = asyncpio.pi()
+    await pi.connect() # connect to local Pi
 
-pi.set_mode(HALL, asyncpio.INPUT)
-pi.set_pull_up_down(HALL, asyncpio.PUD_UP)
+    await pi.set_mode(HALL, asyncpio.INPUT)
+    await pi.set_pull_up_down(HALL, asyncpio.PUD_UP)
 
-start = time.time()
+    start = time.time()
 
-while (time.time() - start) < 60:
-   print("Hall = {}".format(pi.read(HALL)))
-   time.sleep(0.2)
+    while (time.time() - start) < 60:
+        print("Hall = {}".format(await pi.read(HALL)))
+        await asyncio.sleep(0.2)
 
-pi.stop()
+    await pi.stop()
 

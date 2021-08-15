@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import asyncio
+
 import asyncpio
 
 morse={
@@ -25,9 +27,9 @@ GAP=1
 LETTER_GAP=3-GAP
 WORD_GAP=7-LETTER_GAP
 
-def transmit_string(pi, gpio, str):
+async def transmit_string(pi, gpio, str):
 
-   pi.wave_clear() # start a new waveform
+   await pi.wave_clear() # start a new waveform
 
    wf=[]
 
@@ -50,23 +52,27 @@ def transmit_string(pi, gpio, str):
       elif c == ' ':
          wf.append(asyncpio.pulse(NONE, 1<<gpio, WORD_GAP * MICROS))
 
-   pi.wave_add_generic(wf)
+   await pi.wave_add_generic(wf)
 
-   pi.wave_tx_start()
+   await pi.wave_tx_start()
 
-pi = asyncpio.pi()
 
-pi.set_mode(GPIO, asyncpio.OUTPUT)
+async def main():
+    pi = asyncpio.pi()
+    await pi.connect()
 
-transmit_string(pi, GPIO, "Now is the winter of our discontent")
+    await pi.set_mode(GPIO, asyncpio.OUTPUT)
 
-while pi.wave_tx_busy():
-   pass
+    await transmit_string(pi, GPIO, "Now is the winter of our discontent")
 
-transmit_string(pi, GPIO, "made glorious summer by this sun of York")
+    while await pi.wave_tx_busy():
+        pass
 
-while pi.wave_tx_busy():
-   pass
+    await transmit_string(pi, GPIO, "made glorious summer by this sun of York")
 
-pi.stop()
+    while await pi.wave_tx_busy():
+        pass
 
+    await pi.stop()
+
+asyncio.run(main())

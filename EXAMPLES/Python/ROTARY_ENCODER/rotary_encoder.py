@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import asyncio
+
 import asyncpio
 
 class decoder:
@@ -34,14 +36,16 @@ class decoder:
          print("pos={}".format(pos))
 
       pi = asyncpio.pi()
+      await pi.connect()
 
       decoder = rotary_encoder.decoder(pi, 7, 8, callback)
+      await decoder.start()
 
-      time.sleep(300)
+      await asyncio.sleep(300)
 
-      decoder.cancel()
+      await decoder.cancel()
 
-      pi.stop()
+      await pi.stop()
 
       """
 
@@ -55,14 +59,15 @@ class decoder:
 
       self.lastGpio = None
 
-      self.pi.set_mode(gpioA, asyncpio.INPUT)
-      self.pi.set_mode(gpioB, asyncpio.INPUT)
+   async def start(self):
+      await self.pi.set_mode(self.gpioA, asyncpio.INPUT)
+      await self.pi.set_mode(self.gpioB, asyncpio.INPUT)
 
-      self.pi.set_pull_up_down(gpioA, asyncpio.PUD_UP)
-      self.pi.set_pull_up_down(gpioB, asyncpio.PUD_UP)
+      await self.pi.set_pull_up_down(self.gpioA, asyncpio.PUD_UP)
+      await self.pi.set_pull_up_down(self.gpioB, asyncpio.PUD_UP)
 
-      self.cbA = self.pi.callback(gpioA, asyncpio.EITHER_EDGE, self._pulse)
-      self.cbB = self.pi.callback(gpioB, asyncpio.EITHER_EDGE, self._pulse)
+      self.cbA = await self.pi.callback(self.gpioA, asyncpio.EITHER_EDGE, self._pulse)
+      self.cbB = await self.pi.callback(self.gpioB, asyncpio.EITHER_EDGE, self._pulse)
 
    def _pulse(self, gpio, level, tick):
 
@@ -97,39 +102,37 @@ class decoder:
             if self.levA == 1:
                self.callback(-1)
 
-   def cancel(self):
+   async def cancel(self):
 
       """
       Cancel the rotary encoder decoder.
       """
 
-      self.cbA.cancel()
-      self.cbB.cancel()
+      await self.cbA.cancel()
+      await self.cbB.cancel()
 
-if __name__ == "__main__":
-
-   import time
-   import asyncpio
-
-   import rotary_encoder
-
+async def main():
    pos = 0
 
    def callback(way):
 
-      global pos
+      nonlocal pos
 
       pos += way
 
       print("pos={}".format(pos))
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   decoder = rotary_encoder.decoder(pi, 7, 8, callback)
+   decoder = decoder(pi, 7, 8, callback)
+   await decoder.start()
 
-   time.sleep(300)
+   await asyncio.sleep(300)
 
-   decoder.cancel()
+   await decoder.cancel()
 
-   pi.stop()
+   await pi.stop()
 
+if __name__ == "__main__":
+    asyncio.run(main())
