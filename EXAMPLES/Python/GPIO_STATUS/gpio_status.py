@@ -17,49 +17,49 @@ async def cleanup(pi):
    await pi.stop()
 
 async def main():
-    pi = asyncpio.pi()
-    await pi.connect()
+   pi = asyncpio.pi()
+   await pi.connect()
 
-    stdscr = curses.initscr()
-    curses.noecho()
-    curses.cbreak()
+   stdscr = curses.initscr()
+   curses.noecho()
+   curses.cbreak()
 
-    atexit.register(cleanup, pi)
+   atexit.register(cleanup, pi)
 
-    cb = []
+   cb = []
 
-    for g in range(GPIOS):
-        cb.append(await pi.callback(g, asyncpio.EITHER_EDGE))
+   for g in range(GPIOS):
+      cb.append(await pi.callback(g, asyncpio.EITHER_EDGE))
 
-    # disable gpio 28 as the PCM clock is swamping the system
+   # disable gpio 28 as the PCM clock is swamping the system
 
-    await cb[28].cancel()
+   await cb[28].cancel()
 
-    stdscr.nodelay(1)
+   stdscr.nodelay(1)
 
-    stdscr.addstr(0, 23, "Status of gpios 0-31", curses.A_REVERSE)
+   stdscr.addstr(0, 23, "Status of gpios 0-31", curses.A_REVERSE)
 
-    while True:
+   while True:
 
-        for g in range(GPIOS):
-            tally = cb[g].tally()
-            mode = await pi.get_mode(g)
+      for g in range(GPIOS):
+         tally = cb[g].tally()
+         mode = await pi.get_mode(g)
 
-            col = (g // 11) * 25
-            row = (g % 11) + 2
+         col = (g // 11) * 25
+         row = (g % 11) + 2
 
-            stdscr.addstr(row, col, "{:2}".format(g), curses.A_BOLD)
+         stdscr.addstr(row, col, "{:2}".format(g), curses.A_BOLD)
 
-            stdscr.addstr(
-                "={} {:>6}: {:<10}".format(pi.read(g), MODES[mode], tally))
+         stdscr.addstr(
+            "={} {:>6}: {:<10}".format(pi.read(g), MODES[mode], tally))
 
-        stdscr.refresh()
+      stdscr.refresh()
 
-        await asyncio.sleep(0.1)
+      await asyncio.sleep(0.1)
 
-        c = stdscr.getch()
+      c = stdscr.getch()
 
-        if c != curses.ERR:
-            break
+      if c != curses.ERR:
+         break
 
 asyncio.run(main())

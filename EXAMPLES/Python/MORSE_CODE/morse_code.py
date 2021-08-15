@@ -58,21 +58,21 @@ async def transmit_string(pi, gpio, str):
 
 
 async def main():
-    pi = asyncpio.pi()
-    await pi.connect()
+   pi = asyncpio.pi()
+   await pi.connect()
 
-    await pi.set_mode(GPIO, asyncpio.OUTPUT)
+   await pi.set_mode(GPIO, asyncpio.OUTPUT)
 
-    await transmit_string(pi, GPIO, "Now is the winter of our discontent")
+   await transmit_string(pi, GPIO, "Now is the winter of our discontent")
 
-    while await pi.wave_tx_busy():
-        pass
+   while await pi.wave_tx_busy():
+      pass
 
-    await transmit_string(pi, GPIO, "made glorious summer by this sun of York")
+   await transmit_string(pi, GPIO, "made glorious summer by this sun of York")
 
-    while await pi.wave_tx_busy():
-        pass
+   while await pi.wave_tx_busy():
+      pass
 
-    await pi.stop()
+   await pi.stop()
 
 asyncio.run(main())
