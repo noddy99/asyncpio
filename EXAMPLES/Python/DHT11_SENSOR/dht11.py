@@ -166,7 +166,7 @@ async def main():
     async for d in sensor:
         print("temperature: {}".format(d['temperature']))
         print("humidity: {}".format(d['humidity']))
-        asyncio.sleep(1)
+        await asyncio.sleep(1)
     await sensor.close()
 
 
