@@ -2,7 +2,6 @@
 
 import asyncio
 import curses
-import atexit
 
 import asyncpio
 
@@ -16,15 +15,12 @@ async def cleanup(pi):
    curses.endwin()
    await pi.stop()
 
-async def main():
-   pi = asyncpio.pi()
+async def main(pi):
    await pi.connect()
 
    stdscr = curses.initscr()
    curses.noecho()
    curses.cbreak()
-
-   atexit.register(cleanup, pi)
 
    cb = []
 
@@ -62,4 +58,9 @@ async def main():
       if c != curses.ERR:
          break
 
-asyncio.run(main())
+pi = asyncpio.pi()
+loop = asyncio.get_event_loop()
+try:
+    loop.run_until_complete(main(pi))
+finally:
+    loop.run_until_complete(cleanup(pi))
