@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import asyncio
 import time
 
 import asyncpio
@@ -31,14 +32,18 @@ class ranger:
 
       self._triggered = False
 
-      self._trig_mode = pi.get_mode(self._trig)
-      self._echo_mode = pi.get_mode(self._echo)
+   @classmethod
+   async def create(cls, pi, trigger, echo):
+      self = cls(pi, trigger, echo)
 
-      pi.set_mode(self._trig, asyncpio.OUTPUT)
-      pi.set_mode(self._echo, asyncpio.INPUT)
+      self._trig_mode = await pi.get_mode(self._trig)
+      self._echo_mode = await pi.get_mode(self._echo)
 
-      self._cb = pi.callback(self._trig, asyncpio.EITHER_EDGE, self._cbf)
-      self._cb = pi.callback(self._echo, asyncpio.EITHER_EDGE, self._cbf)
+      await pi.set_mode(self._trig, asyncpio.OUTPUT)
+      await pi.set_mode(self._echo, asyncpio.INPUT)
+
+      self._cb = await pi.callback(self._trig, asyncpio.EITHER_EDGE, self._cbf)
+      self._cb = await pi.callback(self._echo, asyncpio.EITHER_EDGE, self._cbf)
 
       self._inited = True
 
@@ -57,7 +62,7 @@ class ranger:
                   self._high = None
                   self._ping = True
 
-   def read(self):
+   async def read(self):
       """
       Triggers a reading.  The returned reading is the number
       of microseconds for the sonar round-trip.
@@ -66,49 +71,47 @@ class ranger:
       """
       if self._inited:
          self._ping = False
-         self.pi.gpio_trigger(self._trig)
+         await self.pi.gpio_trigger(self._trig)
          start = time.time()
          while not self._ping:
             if (time.time()-start) > 5.0:
                return 20000
-            time.sleep(0.001)
+            await asyncio.sleep(0.001)
          return self._time
       else:
          return None
 
-   def cancel(self):
+   async def cancel(self):
       """
       Cancels the ranger and returns the gpios to their
       original mode.
       """
       if self._inited:
          self._inited = False
-         self._cb.cancel()
-         self.pi.set_mode(self._trig, self._trig_mode)
-         self.pi.set_mode(self._echo, self._echo_mode)
+         await self._cb.cancel()
+         await self.pi.set_mode(self._trig, self._trig_mode)
+         await self.pi.set_mode(self._echo, self._echo_mode)
 
-if __name__ == "__main__":
 
-   import time
-
-   import asyncpio
-
-   import sonar_trigger_echo
-
+async def main():
    pi = asyncpio.pi()
+   await pi.connect()
 
-   sonar = sonar_trigger_echo.ranger(pi, 23, 18)
+   sonar = await ranger.create(pi, 23, 18)
 
    end = time.time() + 600.0
 
    r = 1
    while time.time() < end:
 
-      print("{} {}".format(r, sonar.read()))
+      print("{} {}".format(r, await sonar.read()))
       r += 1
-      time.sleep(0.03)
+      await asyncio.sleep(0.03)
 
-   sonar.cancel()
+   await sonar.cancel()
 
-   pi.stop()
+   await pi.stop()
 
+
+if __name__ == "__main__":
+   asyncio.run(main())

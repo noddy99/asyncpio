@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import asyncio
+
 import asyncpio
 
 class decoder:
@@ -13,24 +15,25 @@ class decoder:
 
    #!/usr/bin/env python
 
-   import time
+   import asyncio
 
    import asyncpio
 
    import wiegand
 
-   def callback(bits, code):
-      print("bits={} code={}".format(bits, code))
+   def callback(bits, value):
+      print("bits={} value={}".format(bits, value))
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   w = wiegand.decoder(pi, 14, 15, callback)
+   w = await decoder.create(pi, 14, 15, callback)
 
-   time.sleep(300)
+   await asyncio.sleep(300)
 
-   w.cancel()
+   await w.cancel()
 
-   pi.stop()
+   await pi.stop()
    """
 
    def __init__(self, pi, gpio_0, gpio_1, callback, bit_timeout=5):
@@ -53,16 +56,20 @@ class decoder:
 
       self.in_code = False
 
-      self.pi.set_mode(gpio_0, asyncpio.INPUT)
-      self.pi.set_mode(gpio_1, asyncpio.INPUT)
+   @classmethod
+   async def create(cls, pi, gpio_0, gpio_1, callback, bit_timeout=5):
+      self = cls(pi, gpio_0, gpio_1, callback, bit_timeout=bit_timeout)
 
-      self.pi.set_pull_up_down(gpio_0, asyncpio.PUD_UP)
-      self.pi.set_pull_up_down(gpio_1, asyncpio.PUD_UP)
+      await self.pi.set_mode(gpio_0, asyncpio.INPUT)
+      await self.pi.set_mode(gpio_1, asyncpio.INPUT)
 
-      self.cb_0 = self.pi.callback(gpio_0, asyncpio.FALLING_EDGE, self._cb)
-      self.cb_1 = self.pi.callback(gpio_1, asyncpio.FALLING_EDGE, self._cb)
+      await self.pi.set_pull_up_down(gpio_0, asyncpio.PUD_UP)
+      await self.pi.set_pull_up_down(gpio_1, asyncpio.PUD_UP)
 
-   def _cb(self, gpio, level, tick):
+      await self.cb_0 = self.pi.callback(gpio_0, asyncpio.FALLING_EDGE, self._cb)
+      await self.cb_1 = self.pi.callback(gpio_1, asyncpio.FALLING_EDGE, self._cb)
+
+   async def _cb(self, gpio, level, tick):
 
       """
       Accumulate bits until both gpios 0 and 1 timeout.
@@ -76,8 +83,8 @@ class decoder:
 
             self.in_code = True
             self.code_timeout = 0
-            self.pi.set_watchdog(self.gpio_0, self.bit_timeout)
-            self.pi.set_watchdog(self.gpio_1, self.bit_timeout)
+            await self.pi.set_watchdog(self.gpio_0, self.bit_timeout)
+            await self.pi.set_watchdog(self.gpio_1, self.bit_timeout)
          else:
             self.bits += 1
             self.num = self.num << 1
@@ -98,38 +105,37 @@ class decoder:
                self.code_timeout = self.code_timeout | 2 # timeout gpio 1
 
             if self.code_timeout == 3: # both gpios timed out
-               self.pi.set_watchdog(self.gpio_0, 0)
-               self.pi.set_watchdog(self.gpio_1, 0)
+               await self.pi.set_watchdog(self.gpio_0, 0)
+               await self.pi.set_watchdog(self.gpio_1, 0)
                self.in_code = False
                self.callback(self.bits, self.num)
 
-   def cancel(self):
+   async def cancel(self):
 
       """
       Cancel the Wiegand decoder.
       """
 
-      self.cb_0.cancel()
-      self.cb_1.cancel()
+      await self.cb_0.cancel()
+      await self.cb_1.cancel()
 
-if __name__ == "__main__":
 
-   import time
-
-   import asyncpio
-
-   import wiegand
-
+async def main():
    def callback(bits, value):
       print("bits={} value={}".format(bits, value))
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   w = wiegand.decoder(pi, 14, 15, callback)
+   w = await decoder.create(pi, 14, 15, callback)
 
-   time.sleep(300)
+   await asyncio.sleep(300)
 
-   w.cancel()
+   await w.cancel()
 
-   pi.stop()
+   await pi.stop()
+
+
+if __name__ == "__main__":
+   asyncio.run(main())
 

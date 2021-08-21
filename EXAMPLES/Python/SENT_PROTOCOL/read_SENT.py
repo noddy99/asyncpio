@@ -4,9 +4,11 @@
 # Public Domain by mark smith,   www.surfncircuits.com
 # blog:https://surfncircuits.com/2020/11/27/implementing-a-single-edge-nibble-transmission-sent-protocol-in-python-for-the-raspberry-pi-zero/
 
+import asyncio
 import time
+
 import asyncpio # http://abyz.co.uk/rpi/pigpio/python.html
-import threading
+
 
 class SENTReader:
     """
@@ -73,39 +75,37 @@ class SENTReader:
         self.numberFrames = 0
         self.SampleStopped = False
 
-        self.pi.set_mode(gpio, asyncpio.INPUT)
+    @classmethod
+    async def create(cls, pi, gpio, Mode = 0):
+        self = cls(pi, gpio, Mode=Mode)
+        await self.pi.set_mode(gpio, asyncpio.INPUT)
 
-        #self._cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cbf)
-        #sleep enougth to start reading SENT
-        #time.sleep(0.05)
-
-        #start thread to sample the SENT property
+        #start task to sample the SENT property
         # this is needed for piGPIO sample of 1us and sensing the 3us
-        self.OutputSampleThread = threading.Thread(target = self.SampleCallBack)
-        self.OutputSampleThread.daemon = True
-        self.OutputSampleThread.start()
+        self.OutputSampleTask = asyncio.ensure_future(self.SampleCallBack())
 
-        #give time for thread to start capturing data
-        time.sleep(.05)
+        #give time for task to start capturing data
+        await asyncio.sleep(.05)
 
+        return self
 
-    def SampleCallBack(self):
+    async def SampleCallBack(self):
 
-     # this will run in a loop and sample the SENT path
-     # this sampling is required when 1us sample rate for SENT 3us tick time
-     while True:
+        # this will run in a loop and sample the SENT path
+        # this sampling is required when 1us sample rate for SENT 3us tick time
+        while True:
 
-        self.SampleStopped = False
-        self._cb = self.pi.callback(self.gpio, asyncpio.EITHER_EDGE, self._cbf)
-        # wait until sample stopped
-        while self.SampleStopped == False:
-            #do nothing
-            time.sleep(.001)
+            self.SampleStopped = False
+            self._cb = await self.pi.callback(self.gpio, asyncpio.EITHER_EDGE, self._cbf)
+            # wait until sample stopped
+            while not self.SampleStopped:
+                #do nothing
+                await asyncio.sleep(.001)
 
-        # gives the callback time to cancel so we can start again.
-        time.sleep(0.20)
+            # gives the callback time to cancel so we can start again.
+            await asyncio.sleep(0.20)
 
-    def _cbf(self, gpio, level, tick):
+    async def _cbf(self, gpio, level, tick):
         # depending on the system state set the tick times.
         # first look for sync pulse. this is found when duty ratio >90
         #print(pgio)
@@ -167,7 +167,7 @@ class SENTReader:
                     self.nibble = 0
                     self.numberFrames += 1
                     if self.numberFrames > 2:
-                        self.cancel()
+                        await self.cancel()
                         self.SampleStopped = True
                         self.numberFrames = 0
 
@@ -266,11 +266,11 @@ class SENTReader:
             status, data1, data2, ticktime, crc, errors, syncPulse = self.SENTData()
             return errors
 
-    def cancel(self):
-        self._cb.cancel()
+    async def cancel(self):
+        await self._cb.cancel()
 
-    def stop(self):
-        self.OutputSampleThread.stop()
+    async def stop(self):
+        await self.OutputSampleTask.cancel()
 
     def crcCheck(self, InputBitString, PolyBitString, crcValue ):
         # the input string will be a binary string all 6 nibbles of the SENT data
@@ -292,31 +292,31 @@ class SENTReader:
 
         return checkOK
 
-if __name__ == "__main__":
-
-    import time
-    import asyncpio
-    import read_SENT
-
+async def main():
     SENT_GPIO = 18
     RUN_TIME = 6000000000.0
     SAMPLE_TIME = 0.1
 
     pi = asyncpio.pi()
+    await pi.connect()
 
-    p = read_SENT.SENTReader(pi, SENT_GPIO)
+    p = await SENTReader.create(pi, SENT_GPIO)
 
     start = time.time()
 
     while (time.time() - start) < RUN_TIME:
 
-        time.sleep(SAMPLE_TIME)
+        await asyncio.sleep(SAMPLE_TIME)
 
         status, data1, data2, ticktime, crc, errors, syncPulse = p.SENTData()
         print("Sent Status= %s - 12-bit DATA 1= %4.0f - DATA 2= %4.0f - tickTime(uS)= %4.2f - CRC= %s - Errors= %s - PERIOD = %s" % (status,data1,data2,ticktime,crc,errors,syncPulse))
         print("Sent Stat2s= %s - 12-bit DATA 1= %4.0f - DATA 2= %4.0f - tickTime(uS)= %4.2f - CRC= %s - Errors= %s - PERIOD = %s" % (p.statusNibble(),p.dataField1(),p.dataField2(),p.tick(),p.crcNibble(),p.errorFrame(),p.syncPulse()))
 
     # stop the thread in SENTReader
-    p.stop()
+    await p.stop()
     # clear the pi object instance
-    pi.stop()
+    await pi.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

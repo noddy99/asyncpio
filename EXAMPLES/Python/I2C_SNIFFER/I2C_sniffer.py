@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import time
+import asyncio
 
 import asyncpio
 
@@ -53,12 +53,17 @@ class sniffer:
 
       self.transact = ""
 
+   @classmethod
+   async def create(cls, pi, SCL, SDA, set_as_inputs=True):
+      self = cls(pi, SCL, SDA, set_as_inputs=set_as_inputs)
       if set_as_inputs:
-         self.pi.set_mode(SCL, asyncpio.INPUT)
-         self.pi.set_mode(SDA, asyncpio.INPUT)
+         await self.pi.set_mode(SCL, asyncpio.INPUT)
+         await self.pi.set_mode(SDA, asyncpio.INPUT)
 
-      self.cbA = self.pi.callback(SCL, asyncpio.EITHER_EDGE, self._cb)
-      self.cbB = self.pi.callback(SDA, asyncpio.EITHER_EDGE, self._cb)
+      self.cbA = await self.pi.callback(SCL, asyncpio.EITHER_EDGE, self._cb)
+      self.cbB = await self.pi.callback(SDA, asyncpio.EITHER_EDGE, self._cb)
+
+      return self
 
    def _parse(self, SCL, SDA):
       """
@@ -138,26 +143,24 @@ class sniffer:
 
       self._parse(SCL, SDA)
 
-   def cancel(self):
+   async def cancel(self):
       """Cancel the I2C callbacks."""
-      self.cbA.cancel()
-      self.cbB.cancel()
+      await self.cbA.cancel()
+      await self.cbB.cancel()
+
+
+async def main():
+   pi = asyncpio.pi()
+   await pi.connect()
+
+   s = await sniffer.create(pi, 1, 0, False) # leave gpios 1/0 in I2C mode
+
+   await asyncio.sleep(60000)
+
+   await s.cancel()
+
+   await pi.stop()
+
 
 if __name__ == "__main__":
-
-   import time
-
-   import asyncpio
-
-   import I2C_sniffer
-
-   pi = asyncpio.pi()
-
-   s = I2C_sniffer.sniffer(pi, 1, 0, False) # leave gpios 1/0 in I2C mode
-
-   time.sleep(60000)
-
-   s.cancel()
-
-   pi.stop()
-
+   asyncio.run(main())

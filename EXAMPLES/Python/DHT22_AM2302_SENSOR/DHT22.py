@@ -2,8 +2,8 @@
 
 # 2014-07-11 DHT22.py
 
+import asyncio
 import time
-import atexit
 
 import asyncpio
 
@@ -52,16 +52,8 @@ class sensor:
       self.gpio = gpio
       self.LED = LED
       self.power = power
-
-      if power is not None:
-         pi.write(power, 1)  # Switch sensor on.
-         time.sleep(2)
-
-      self.powered = True
-
+      self.powered = False
       self.cb = None
-
-      atexit.register(self.cancel)
 
       self.bad_CS = 0  # Bad checksum count.
       self.bad_SM = 0  # Short message count.
@@ -80,13 +72,21 @@ class sensor:
       self.high_tick = 0
       self.bit = 40
 
-      pi.set_pull_up_down(gpio, asyncpio.PUD_OFF)
+   @classmethod
+   async def create(cls, pi, gpio, LED=None, power=None):
+      self = cls(pi, gpio, LED=LED, power=power)
+      if self.power is not None:
+         await self.pi.write(self.power, 1)  # Switch sensor on.
+         await asyncio.sleep(2)
+         self.powered = True
 
-      pi.set_watchdog(gpio, 0)  # Kill any watchdogs.
+      await self.pi.set_pull_up_down(self.gpio, asyncpio.PUD_OFF)
+      await self.pi.set_watchdog(self.gpio, 0)  # Kill any watchdogs.
+      self.cb = await self.pi.callback(self.gpio, asyncpio.EITHER_EDGE, self._cb)
 
-      self.cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cb)
+      return self
 
-   def _cb(self, gpio, level, tick):
+   async def _cb(self, gpio, level, tick):
       """
       Accumulate the 40 data bits.  Format into 5 bytes, humidity high,
       humidity low, temperature high, temperature low, checksum.
@@ -114,7 +114,7 @@ class sensor:
 
                # 40th bit received.
 
-               self.pi.set_watchdog(self.gpio, 0)
+               await self.pi.set_watchdog(self.gpio, 0)
 
                self.no_response = 0
 
@@ -135,7 +135,7 @@ class sensor:
                   self.tov = time.time()
 
                   if self.LED is not None:
-                     self.pi.write(self.LED, 0)
+                     await self.pi.write(self.LED, 0)
 
                else:
 
@@ -169,7 +169,7 @@ class sensor:
             self.CS = 0
 
       else:  # level == asyncpio.TIMEOUT:
-         self.pi.set_watchdog(self.gpio, 0)
+         await self.pi.set_watchdog(self.gpio, 0)
          if self.bit < 8:       # Too few data bits received.
             self.bad_MM += 1    # Bump missing message count.
             self.no_response += 1
@@ -178,10 +178,10 @@ class sensor:
                self.bad_SR += 1  # Bump sensor reset count.
                if self.power is not None:
                   self.powered = False
-                  self.pi.write(self.power, 0)
-                  time.sleep(2)
-                  self.pi.write(self.power, 1)
-                  time.sleep(2)
+                  await self.pi.write(self.power, 0)
+                  await asyncio.sleep(2)
+                  await self.pi.write(self.power, 1)
+                  await asyncio.sleep(2)
                   self.powered = True
          elif self.bit < 39:    # Short message receieved.
             self.bad_SM += 1    # Bump short message count.
@@ -221,63 +221,66 @@ class sensor:
       """Return count of power cycles because of sensor hangs."""
       return self.bad_SR
 
-   def trigger(self):
+   async def trigger(self):
       """Trigger a new relative humidity and temperature reading."""
       if self.powered:
          if self.LED is not None:
-            self.pi.write(self.LED, 1)
+            await self.pi.write(self.LED, 1)
 
-         self.pi.write(self.gpio, asyncpio.LOW)
-         time.sleep(0.017)  # 17 ms
-         self.pi.set_mode(self.gpio, asyncpio.INPUT)
-         self.pi.set_watchdog(self.gpio, 200)
+         await self.pi.write(self.gpio, asyncpio.LOW)
+         await asyncio.sleep(0.017)  # 17 ms
+         await self.pi.set_mode(self.gpio, asyncpio.INPUT)
+         await self.pi.set_watchdog(self.gpio, 200)
 
-   def cancel(self):
+   async def cancel(self):
       """Cancel the DHT22 sensor."""
 
-      self.pi.set_watchdog(self.gpio, 0)
+      await self.pi.set_watchdog(self.gpio, 0)
 
       if self.cb is not None:
-         self.cb.cancel()
+         await self.cb.cancel()
          self.cb = None
 
-if __name__ == "__main__":
 
-   import time
-
-   import asyncpio
-
-   import DHT22
+async def main():
+   pi = asyncpio.pi()
 
    # Intervals of about 2 seconds or less will eventually hang the DHT22.
    INTERVAL = 3
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   s = DHT22.sensor(pi, 22, LED=16, power=8)
+   s = await sensor.create(pi, 22, LED=16, power=8)
 
-   r = 0
+   try:
+      r = 0
 
-   next_reading = time.time()
+      next_reading = time.time()
 
-   while True:
+      while True:
 
-      r += 1
+         r += 1
 
-      s.trigger()
+         await s.trigger()
 
-      time.sleep(0.2)
+         await asyncio.sleep(0.2)
 
-      print("{} {} {} {:3.2f} {} {} {} {}".format(
-         r, s.humidity(), s.temperature(), s.staleness(),
-         s.bad_checksum(), s.short_message(), s.missing_message(),
-         s.sensor_resets()))
+         print("{} {} {} {:3.2f} {} {} {} {}".format(
+            r, s.humidity(), s.temperature(), s.staleness(),
+            s.bad_checksum(), s.short_message(), s.missing_message(),
+            s.sensor_resets()))
 
-      next_reading += INTERVAL
+         next_reading += INTERVAL
 
-      time.sleep(next_reading-time.time())  # Overall INTERVAL second polling.
+         await asyncio.sleep(next_reading-time.time())  # Overall INTERVAL second polling.
 
-   s.cancel()
+   except KeyboardInterrupt:
+      await s.cancel()
 
-   pi.stop()
+   await pi.stop()
+
+
+if __name__ == "__main__":
+   asyncio.run(main())
 

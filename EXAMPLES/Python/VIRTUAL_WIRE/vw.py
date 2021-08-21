@@ -8,6 +8,7 @@ It has been tested between a Pi, TI Launchpad, and Arduino Pro Mini.
 # 2014-08-14
 # vw.py
 
+import asyncio
 import time
 
 import asyncpio
@@ -22,7 +23,7 @@ _HEADER=[0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x2a, 0x38, 0x2c]
 _CTL=3
 
 _SYMBOL=[
-   0x0d, 0x0e, 0x13, 0x15, 0x16, 0x19, 0x1a, 0x1c, 
+   0x0d, 0x0e, 0x13, 0x15, 0x16, 0x19, 0x1a, 0x1c,
    0x23, 0x25, 0x26, 0x29, 0x2a, 0x2c, 0x32, 0x34]
 
 
@@ -64,9 +65,15 @@ class tx():
 
       self.wave_id = None
 
-      pi.wave_add_new()
+   @classmethod
+   async def create(cls, pi, txgpio, bps=2000):
+      self = cls(pi, txgpio, bps=bps)
 
-      pi.set_mode(txgpio, asyncpio.OUTPUT)
+      await pi.wave_add_new()
+
+      await pi.set_mode(txgpio, asyncpio.OUTPUT)
+
+      return self
 
 
    def _nibble(self, nibble):
@@ -82,7 +89,7 @@ class tx():
       self._nibble(_SYMBOL[byte&0x0F])
       return _crc_ccitt_update(crc, byte)
 
-   def put(self, data):
+   async def put(self, data):
       """
       Transmit a message.  If the message is more than
       MAX_MESSAGE_BYTES in size it is discarded.  If a message
@@ -96,7 +103,7 @@ class tx():
 
       self.wf = []
 
-      self.cancel()
+      await self.cancel()
 
       for i in _HEADER:
          self._nibble(i)
@@ -117,32 +124,32 @@ class tx():
       self._byte(0, crc&0xFF)
       self._byte(0, crc>>8)
 
-      self.pi.wave_add_generic(self.wf)
+      await self.pi.wave_add_generic(self.wf)
 
-      self.wave_id = self.pi.wave_create()
+      self.wave_id = await self.pi.wave_create()
 
       if self.wave_id >= 0:
-         self.pi.wave_send_once(self.wave_id)
+         await self.pi.wave_send_once(self.wave_id)
          return True
       else:
          return False
 
 
-   def ready(self):
+   async def ready(self):
       """
       Returns True if a new message may be transmitted.
       """
-      return not self.pi.wave_tx_busy()
+      return not await self.pi.wave_tx_busy()
 
-   def cancel(self):
+   async def cancel(self):
       """
       Cancels the wireless transmitter, aborting any message
       in progress.
       """
       if self.wave_id is not None:
-         self.pi.wave_tx_stop()
-         self.pi.wave_delete(self.wave_id)
-         self.pi.wave_add_new()
+         await self.pi.wave_tx_stop()
+         await self.pi.wave_delete(self.wave_id)
+         await self.pi.wave_add_new()
 
       self.wave_id = None
 
@@ -184,9 +191,15 @@ class rx():
       self.message_len = 0
       self.byte = 0
 
-      pi.set_mode(rxgpio, asyncpio.INPUT)
+   @classmethod
+   async def create(cls, pi, rxgpio, bps=2000):
+      self = cls(pi, rxgpio, bps=bps)
 
-      self.cb = pi.callback(rxgpio, asyncpio.EITHER_EDGE, self._cb)
+      await pi.set_mode(rxgpio, asyncpio.INPUT)
+
+      self.cb = await pi.callback(rxgpio, asyncpio.EITHER_EDGE, self._cb)
+
+      return self
 
    def _calc_crc(self):
 
@@ -195,7 +208,7 @@ class rx():
          crc = _crc_ccitt_update(crc, self.message[i])
       return crc
 
-   def _insert(self, bits, level):
+   async def _insert(self, bits, level):
 
       for i in range(bits):
 
@@ -228,7 +241,7 @@ class rx():
 
                if self.byte >= self.message_length:
                   self.in_message = False
-                  self.pi.set_watchdog(self.rxgpio, 0)
+                  await self.pi.set_watchdog(self.rxgpio, 0)
 
                   crc = self._calc_crc()
 
@@ -241,20 +254,20 @@ class rx():
          else:
             if self.token == 0xB38: # Start message token.
                self.in_message = True
-               self.pi.set_watchdog(self.rxgpio, self.timeout)
+               await self.pi.set_watchdog(self.rxgpio, self.timeout)
                self.bits = 0
                self.byte = 0
 
-   def _cb(self, gpio, level, tick):
+   async def _cb(self, gpio, level, tick):
 
       if self.last_tick is not None:
 
          if level == asyncpio.TIMEOUT:
 
-            self.pi.set_watchdog(self.rxgpio, 0) # Switch watchdog off.
+            await self.pi.set_watchdog(self.rxgpio, 0) # Switch watchdog off.
 
             if self.in_message:
-               self._insert(4, not self.last_level)
+               await self._insert(4, not self.last_level)
 
             self.good = 0
             self.in_message = False
@@ -271,7 +284,7 @@ class rx():
             elif edge > self.max_mics:
 
                if self.in_message:
-                  self._insert(4, level)
+                  await self._insert(4, level)
 
                self.good = 0
                self.in_message = False
@@ -293,7 +306,7 @@ class rx():
                   else:
                      bits = 4
 
-                  self._insert(bits, level)
+                  await self._insert(bits, level)
 
       self.last_tick = tick
       self.last_level = level
@@ -313,32 +326,27 @@ class rx():
       """
       return len(self.messages)
 
-   def cancel(self):
+   async def cancel(self):
       """
       Cancels the wireless receiver.
       """
       if self.cb is not None:
-         self.cb.cancel()
-         self.pi.set_watchdog(self.rxgpio, 0)
+         await self.cb.cancel()
+         await self.pi.set_watchdog(self.rxgpio, 0)
       self.cb = None
 
-if __name__ == "__main__":
 
-   import time
-
-   import asyncpio
-
-   import vw
-
+async def main():
    RX=11
    TX=25
 
    BPS=2000
 
    pi = asyncpio.pi() # Connect to local Pi.
+   await pi.connect()
 
-   rx = vw.rx(pi, RX, BPS) # Specify Pi, rx gpio, and baud.
-   tx = vw.tx(pi, TX, BPS) # Specify Pi, tx gpio, and baud.
+   rx = await rx.create(pi, RX, BPS) # Specify Pi, rx gpio, and baud.
+   tx = await tx.create(pi, TX, BPS) # Specify Pi, tx gpio, and baud.
 
    msg = 0
 
@@ -348,25 +356,28 @@ if __name__ == "__main__":
 
       msg += 1
 
-      while not tx.ready():
-         time.sleep(0.1)
+      while not await tx.ready():
+         await asyncio.sleep(0.1)
 
-      time.sleep(0.2)
+      await asyncio.sleep(0.2)
 
-      tx.put([48, 49, 65, ((msg>>6)&0x3F)+32, (msg&0x3F)+32])
+      await tx.put([48, 49, 65, ((msg>>6)&0x3F)+32, (msg&0x3F)+32])
 
-      while not tx.ready():
-         time.sleep(0.1)
+      while not await tx.ready():
+         await asyncio.sleep(0.1)
 
-      time.sleep(0.2)
+      await asyncio.sleep(0.2)
 
-      tx.put("Hello World #{}!".format(msg))
+      await tx.put("Hello World #{}!".format(msg))
 
       while rx.ready():
          print("".join(chr (c) for c in rx.get()))
 
-   rx.cancel()
-   tx.cancel()
+   await rx.cancel()
+   await tx.cancel()
 
-   pi.stop()
+   await pi.stop()
+
+if __name__ == "__main__":
+   asyncio.run(main())
 

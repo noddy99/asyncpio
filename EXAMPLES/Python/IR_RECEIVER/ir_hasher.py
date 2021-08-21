@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+import asyncio
+import time
+
 import asyncpio
 
 class hasher:
@@ -29,14 +32,15 @@ class hasher:
       print("hash={}".format(hash));
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   ir = ir_hasher.hasher(pi, 7, callback, 5)
+   ir = await ir_hasher.hasher.create(pi, 7, callback, 5)
 
    print("ctrl c to exit");
 
    time.sleep(300)
 
-   pi.stop()
+   await pi.stop()
    """
 
    def __init__(self, pi, gpio, callback, timeout=5):
@@ -53,9 +57,13 @@ class hasher:
 
       self.in_code = False
 
-      pi.set_mode(gpio, asyncpio.INPUT)
+   @classmethod
+   async def create(cls, pi, gpio, callback, timeout=5):
+      self = cls(gpio, gpio, callback, timeout=time)
+      await pi.set_mode(gpio, asyncpio.INPUT)
 
-      self.cb = pi.callback(gpio, asyncpio.EITHER_EDGE, self._cb)
+      self.cb = await pi.callback(gpio, asyncpio.EITHER_EDGE, self._cb)
+      return self
 
    def _hash(self, old_val, new_val):
 
@@ -70,7 +78,7 @@ class hasher:
       self.hash_val *= 16777619 # FNV_PRIME_32
       self.hash_val = self.hash_val & ((1<<32)-1)
 
-   def _cb(self, gpio, level, tick):
+   async def _cb(self, gpio, level, tick):
 
       if level != asyncpio.TIMEOUT:
 
@@ -78,7 +86,7 @@ class hasher:
 
             self.in_code = True
 
-            self.pi.set_watchdog(self.gpio, self.code_timeout)
+            await self.pi.set_watchdog(self.gpio, self.code_timeout)
 
             self.hash_val = 2166136261 # FNV_BASIS_32
 
@@ -111,18 +119,13 @@ class hasher:
 
             self.in_code = False
 
-            self.pi.set_watchdog(self.gpio, 0)
+            await self.pi.set_watchdog(self.gpio, 0)
 
             if self.edges > 12:
 
-               self.callback(self.hash_val)
+               await self.callback(self.hash_val)
 
-if __name__ == "__main__":
-
-   import time
-   import asyncpio
-   import ir_hasher
-
+async def main():
    hashes = {
       142650387: '2',       244341844: 'menu',    262513468: 'vol-',
       272048826: '5',       345069212: '6',       363685443: 'prev.ch',
@@ -151,15 +154,19 @@ if __name__ == "__main__":
 
    def callback(hash):
       if hash in hashes:
-         print("key={} hash={}".format(hashes[hash], hash));
+         print("key={} hash={}".format(hashes[hash], hash))
 
    pi = asyncpio.pi()
+   await pi.connect()
 
-   ir = ir_hasher.hasher(pi, 7, callback, 5)
+   ir = await hasher.create(pi, 7, callback, 5)
 
-   print("ctrl c to exit");
+   print("ctrl c to exit")
 
-   time.sleep(300)
+   await asyncio.sleep(300)
 
-   pi.stop()
+   await pi.stop()
 
+
+if __name__ == "__main__":
+   asyncio.run(main())
